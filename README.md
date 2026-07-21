@@ -1,4 +1,6 @@
 # Halo
+![Status: Work in Progress](https://img.shields.io/badge/Status-Work_in_Progress-orange)
+![Version: Pre-release](https://img.shields.io/badge/Version-v1.0_Beta-blue)
 
 An invisible AI overlay for macOS — captures your screen, mic, and meeting audio to power a real-time AI copilot that stays hidden from screen shares.
 
