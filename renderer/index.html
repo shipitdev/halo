@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Halo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="halo-root">
+
+    <!-- ─── Toolbar (always visible, horizontal bar) ───────────────── -->
+    <div id="halo-toolbar">
+      <div class="toolbar-left">
+        <span class="toolbar-logo">Halo</span>
+        <span class="toolbar-divider"></span>
+        <button id="btn-listen" class="toolbar-btn mic-btn" title="Start Listening" aria-label="Toggle Listening">
+          <span data-icon="mic"></span>
+        </button>
+      </div>
+
+      <div class="toolbar-center">
+        <button id="btn-assist" class="toolbar-btn accent" title="AI Assist">
+          <span data-icon="assist"></span>
+          <span>AI Answer</span>
+        </button>
+        <button id="btn-code" class="toolbar-btn" title="Analyze Screen">
+          <span data-icon="code"></span>
+          <span>Analyze Screen</span>
+        </button>
+        <button id="btn-say" class="toolbar-btn" title="What Should I Say">
+          <span data-icon="say"></span>
+          <span>Chat</span>
+        </button>
+      </div>
+
+      <div class="toolbar-right">
+        <div id="status-indicator" class="status-idle" title="Idle">
+          <span class="status-dot"></span>
+          <span class="status-text">idle</span>
+        </div>
+        <button id="btn-settings" class="toolbar-icon-btn" title="Settings" aria-label="Settings">
+          <span data-icon="settings"></span>
+        </button>
+        <button id="btn-expand" class="toolbar-icon-btn" title="Expand / Collapse" aria-label="Toggle panel">
+          <span data-icon="chevron" id="chevron-icon"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ─── Expandable Content (slides down from toolbar) ──────────── -->
+    <div id="halo-panel" class="collapsed">
+
+      <!-- Response Area -->
+      <div id="response-area">
+        <div id="response-stream"></div>
+      </div>
+
+      <!-- Quick Actions Row (visible when expanded) -->
+      <div id="quick-actions">
+        <button id="btn-followup" class="quick-btn" title="Follow-up">
+          <span data-icon="followup"></span>
+          Follow-up
+        </button>
+        <button id="btn-recap" class="quick-btn" title="Recap">
+          <span data-icon="recap"></span>
+          Recap
+        </button>
+        <button id="btn-model-toggle" class="quick-btn model-toggle" title="Switch Model">
+          <span class="model-label">smart</span>
+        </button>
+      </div>
+
+      <!-- Input Bar (visible when expanded) -->
+      <div id="input-bar">
+        <input
+          id="input-field"
+          type="text"
+          placeholder="Ask anything…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="btn-send" class="send-btn" title="Send" aria-label="Send">
+          <span data-icon="send"></span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- ─── Notification Toast (shows briefly above toolbar) ───────── -->
+    <div id="halo-toast" class="hidden">
+      <div id="toast-content"></div>
+      <div id="toast-actions">
+        <button id="toast-dismiss" class="toast-btn" title="Dismiss">✕</button>
+        <button id="toast-accept" class="toast-btn accent" title="Accept">✓</button>
+      </div>
+    </div>
+
+    <!-- ─── Settings Modal ─────────────────────────────────────────── -->
+    <div id="settings-overlay" class="modal-overlay hidden">
+      <div id="settings-modal" class="modal">
+        <div class="modal-header">
+          <h2>Settings</h2>
+          <button id="btn-close-settings" class="toolbar-icon-btn" title="Close" aria-label="Close Settings">
+            <span data-icon="close"></span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <section class="settings-section">
+            <h3>AI Provider</h3>
+            <div class="setting-row">
+              <label for="select-provider">Provider</label>
+              <select id="select-provider">
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="gemini">Google Gemini</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label for="input-api-key">API Key</label>
+              <input id="input-api-key" type="password" placeholder="sk-..." autocomplete="off" />
+            </div>
+          </section>
+          <section class="settings-section">
+            <h3>Transcription</h3>
+            <div class="setting-row">
+              <label for="select-stt-provider">STT Provider</label>
+              <select id="select-stt-provider">
+                <option value="openai">OpenAI Whisper</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label for="input-stt-key">STT API Key</label>
+              <input id="input-stt-key" type="password" placeholder="(same if same provider)" autocomplete="off" />
+            </div>
+          </section>
+          <section class="settings-section">
+            <h3>Hotkeys</h3>
+            <div class="setting-row">
+              <label for="hotkey-toggle">Toggle</label>
+              <input id="hotkey-toggle" class="hotkey-input" type="text" value="Cmd+B" readonly />
+            </div>
+            <div class="setting-row">
+              <label for="hotkey-assist">Assist</label>
+              <input id="hotkey-assist" class="hotkey-input" type="text" value="Cmd+Enter" readonly />
+            </div>
+            <div class="setting-row">
+              <label for="hotkey-code">Code</label>
+              <input id="hotkey-code" class="hotkey-input" type="text" value="Cmd+Shift+H" readonly />
+            </div>
+            <div class="setting-row">
+              <label for="hotkey-quit">Quit</label>
+              <input id="hotkey-quit" class="hotkey-input" type="text" value="Cmd+Shift+X" readonly />
+            </div>
+          </section>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-save-settings" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

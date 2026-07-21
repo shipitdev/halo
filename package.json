@@ -1,0 +1,55 @@
+{
+  "name": "halo",
+  "version": "1.0.0",
+  "description": "An invisible AI overlay for macOS — captures your screen, mic, and meeting audio to power a real-time AI copilot that stays hidden from screen shares.",
+  "license": "GPL-3.0-only",
+  "author": "shipitdev",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --mac zip"
+  },
+  "build": {
+    "appId": "com.shipitdev.halo",
+    "productName": "Halo",
+    "asar": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*"
+    ],
+    "mac": {
+      "target": ["dir"],
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "Halo transcribes your microphone to help you in conversations.",
+        "NSCameraUsageDescription": "Halo does not use the camera.",
+        "NSAudioCaptureUsageDescription": "Halo captures system audio to transcribe meeting participants."
+      }
+    }
+  },
+  "keywords": [
+    "electron",
+    "overlay",
+    "ai",
+    "copilot",
+    "macos",
+    "assistant",
+    "screencapture"
+  ],
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@google/genai": "^0.3.0",
+    "openai": "^4.73.0"
+  }
+}
