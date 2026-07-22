@@ -13,14 +13,20 @@ const {
   desktopCapturer,
   nativeImage,
   screen,
+  dialog,
 } = require('electron');
 const path = require('path');
 const { ConfigManager } = require('./src/config');
+const { KnowledgeBase } = require('./src/knowledge');
+const { MeetingDetector } = require('./src/meetings');
+const { createProvider, getTranscriptionProvider, getModel } = require('./src/providers');
 
 // ─── Globals ────────────────────────────────────────────────────────────────
 let mainWindow = null;
 let tray = null;
 let config = null;
+let kb = null;
+let meetingDetector = null;
 let isListening = false;
 let isVisible = true;
 
@@ -37,13 +43,16 @@ function createOverlayWindow() {
   mainWindow = new BrowserWindow({
     width: TOOLBAR_WIDTH,
     height: TOOLBAR_HEIGHT,
+    minWidth: 400,
+    minHeight: TOOLBAR_HEIGHT,
+    maxHeight: 800,
     x: Math.round((screenWidth - TOOLBAR_WIDTH) / 2),
     y: 8,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
-    resizable: false,
+    resizable: true,
     movable: true,
     hasShadow: false,
     roundedCorners: true,
@@ -190,18 +199,20 @@ function registerHotkeys() {
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 function setupIPC() {
-  // Screenshot capture
+  // Screenshot capture — compressed JPEG (max 1024px) to prevent 429 Rate Limit Errors
   ipcMain.handle('halo:capture-screen', async () => {
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
-        thumbnailSize: screen.getPrimaryDisplay().size,
+        thumbnailSize: { width: 1280, height: 720 },
       });
 
       if (sources.length === 0) return null;
 
-      const primarySource = sources[0];
-      return primarySource.thumbnail.toDataURL();
+      const thumb = sources[0].thumbnail;
+      const resized = thumb.resize({ width: 1024 });
+      const jpegBuf = resized.toJPEG(75);
+      return `data:image/jpeg;base64,${jpegBuf.toString('base64')}`;
     } catch (err) {
       console.error('Screenshot capture failed:', err);
       return null;
@@ -250,16 +261,205 @@ function setupIPC() {
     isListening = state;
     updateTrayMenu();
   });
+
+  // ─── Knowledge Base IPC ─────────────────────────────────────────────
+
+  // Resume
+  ipcMain.handle('halo:upload-resume', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Upload Resume',
+      filters: [
+        { name: 'Documents', extensions: ['pdf', 'txt', 'md'] },
+      ],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return await kb.setResume(result.filePaths[0]);
+  });
+
+  ipcMain.handle('halo:get-resume', () => {
+    return kb.getResume();
+  });
+
+  ipcMain.handle('halo:clear-resume', () => {
+    kb.clearResume();
+    return true;
+  });
+
+  // Documents
+  ipcMain.handle('halo:upload-doc', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Upload Document',
+      filters: [
+        { name: 'Documents', extensions: ['pdf', 'txt', 'md', 'json'] },
+      ],
+      properties: ['openFile', 'multiSelections'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return [];
+
+    const added = [];
+    for (const fp of result.filePaths) {
+      try {
+        const doc = await kb.addDocument(fp);
+        added.push(doc);
+      } catch (err) {
+        console.error('Failed to add document:', fp, err.message);
+      }
+    }
+    return added;
+  });
+
+  ipcMain.handle('halo:list-docs', () => {
+    return kb.listDocuments();
+  });
+
+  ipcMain.handle('halo:remove-doc', (_event, id) => {
+    return kb.removeDocument(id);
+  });
+
+  ipcMain.handle('halo:get-knowledge-context', () => {
+    return kb.getContext();
+  });
+
+  ipcMain.handle('halo:has-knowledge', () => {
+    return kb.hasContext();
+  });
+
+  // ─── Meeting Detection IPC ──────────────────────────────────────────
+
+  ipcMain.handle('halo:get-active-meeting', () => {
+    return meetingDetector ? meetingDetector.getActiveMeeting() : null;
+  });
+
+  // ─── AI Provider & STT IPC ──────────────────────────────────────────
+  ipcMain.on('halo:stream-ai', async (event, payload) => {
+    const { id, messages = [], screenshot } = payload;
+
+    try {
+      const providerName = config.get('provider', 'openai');
+      const apiKey = config.get('apiKey', '');
+      const useSmart = config.get('useSmart', true);
+
+      if (!apiKey) {
+        throw new Error(`API key for provider "${providerName}" is missing. Please set your key in Settings.`);
+      }
+
+      const model = getModel(providerName, useSmart);
+      const provider = createProvider(providerName, apiKey);
+
+      // Inject Knowledge Base context if available
+      const kbContext = kb ? kb.getContext() : '';
+      const processedMessages = messages.map((m) => ({ ...m }));
+
+      if (kbContext) {
+        const sysIdx = processedMessages.findIndex((m) => m.role === 'system');
+        if (sysIdx !== -1) {
+          processedMessages[sysIdx].content += `\n\n[KNOWLEDGE BASE & RESUME CONTEXT]\n${kbContext}`;
+        } else {
+          processedMessages.unshift({
+            role: 'system',
+            content: `[KNOWLEDGE BASE & RESUME CONTEXT]\n${kbContext}`,
+          });
+        }
+      }
+
+      // Format multimodal image if screenshot attached
+      if (screenshot && typeof screenshot === 'string' && screenshot.startsWith('data:image/')) {
+        let lastUserIdx = -1;
+        for (let i = processedMessages.length - 1; i >= 0; i--) {
+          if (processedMessages[i].role === 'user') {
+            lastUserIdx = i;
+            break;
+          }
+        }
+
+        if (lastUserIdx !== -1) {
+          const userMsg = processedMessages[lastUserIdx];
+          const textPrompt = typeof userMsg.content === 'string'
+            ? userMsg.content
+            : 'Analyze the visible content on screen.';
+
+          userMsg.content = [
+            { type: 'text', text: textPrompt },
+            { type: 'image_url', image_url: { url: screenshot, detail: 'low' } },
+          ];
+        }
+      }
+
+      let fullText = '';
+      for await (const chunk of provider.chat(processedMessages, { model })) {
+        fullText += chunk;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          event.sender.send('halo:ai-chunk', { id, chunk });
+        }
+      }
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        event.sender.send('halo:ai-end', { id, fullText });
+      }
+    } catch (err) {
+      console.error('AI Stream Error:', err.message);
+      let userErrorMsg = err.message;
+      if (err.message.includes('429') || err.message.includes('Too Many Requests') || err.message.includes('RESOURCE_EXHAUSTED')) {
+        userErrorMsg = 'Rate limit reached (429 Too Many Requests). Please wait a few seconds before trying again, or check your API key quota in provider settings.';
+      } else if (err.message.includes('401') || err.message.includes('API key') || err.message.includes('unauthorized')) {
+        userErrorMsg = `Authentication error with ${providerName}. Please verify your API key in Settings.`;
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        event.sender.send('halo:ai-error', { id, error: userErrorMsg });
+      }
+    }
+  });
+
+  ipcMain.handle('halo:transcribe-audio', async (_event, audioBuffer, format = 'webm') => {
+    try {
+      const sttProviderName = config.get('sttProvider', 'openai');
+      const sttApiKey = config.get('sttApiKey') || config.get('apiKey');
+
+      if (!sttApiKey) {
+        throw new Error('STT API key is not configured.');
+      }
+
+      const buf = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
+      const provider = createProvider(sttProviderName, sttApiKey);
+
+      if (!provider.supportsTranscription()) {
+        throw new Error(`Provider "${sttProviderName}" does not support speech transcription.`);
+      }
+
+      return await provider.transcribe(buf, format);
+    } catch (err) {
+      console.error('STT Transcription error:', err);
+      throw err;
+    }
+  });
 }
 
 // ─── App Lifecycle ──────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   config = new ConfigManager();
+  kb = new KnowledgeBase();
+  meetingDetector = new MeetingDetector();
 
   createOverlayWindow();
   createTray();
   setupIPC();
   registerHotkeys();
+
+  // Start meeting detection
+  meetingDetector.start();
+
+  meetingDetector.on('meeting-started', (meeting) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('halo:meeting-detected', meeting);
+    }
+  });
+
+  meetingDetector.on('meeting-ended', (meeting) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('halo:meeting-ended', meeting);
+    }
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

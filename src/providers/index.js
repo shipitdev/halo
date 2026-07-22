@@ -61,7 +61,7 @@ function getModel(providerName, smart = true) {
   const models = {
     openai: { smart: 'gpt-4o', fast: 'gpt-4o-mini' },
     anthropic: { smart: 'claude-sonnet-4-20250514', fast: 'claude-haiku-3-20250317' },
-    gemini: { smart: 'gemini-2.0-flash', fast: 'gemini-2.0-flash-lite' },
+    gemini: { smart: 'gemini-3.6-flash', fast: 'gemini-3.5-flash' },
   };
 
   return models[providerName]?.[smart ? 'smart' : 'fast'] || 'gpt-4o';

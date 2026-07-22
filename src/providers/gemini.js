@@ -12,8 +12,8 @@ class GeminiProvider extends BaseProvider {
 
   get models() {
     return {
-      smart: 'gemini-2.0-flash',
-      fast: 'gemini-2.0-flash-lite',
+      smart: 'gemini-3.6-flash',
+      fast: 'gemini-3.5-flash',
     };
   }
 
@@ -21,28 +21,83 @@ class GeminiProvider extends BaseProvider {
    * Stream chat via Gemini API.
    */
   async *chat(messages, options = {}) {
-    const model = options.model || this.models.smart;
+    let model = options.model || this.models.smart;
 
     const { GoogleGenAI } = require('@google/genai');
     const ai = new GoogleGenAI({ apiKey: this.apiKey });
 
     // Separate system instruction from messages
-    const systemMsg = messages.find((m) => m.role === 'system');
+    const systemParts = messages
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content)
+      .filter(Boolean);
+    const systemInstruction = systemParts.join('\n\n');
+
     const chatMessages = messages
       .filter((m) => m.role !== 'system')
-      .map((m) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      }));
+      .map((m) => {
+        const role = m.role === 'assistant' ? 'model' : 'user';
+        const parts = [];
 
-    const response = await ai.models.generateContentStream({
-      model,
-      contents: chatMessages,
-      config: {
-        systemInstruction: systemMsg ? systemMsg.content : undefined,
-        maxOutputTokens: options.maxTokens || 4096,
-      },
-    });
+        if (typeof m.content === 'string') {
+          if (m.content.startsWith('data:image/')) {
+            const match = m.content.match(/^data:(image\/\w+);base64,(.+)$/);
+            if (match) {
+              parts.push({
+                inlineData: {
+                  mimeType: match[1],
+                  data: match[2],
+                },
+              });
+            } else {
+              parts.push({ text: m.content });
+            }
+          } else {
+            parts.push({ text: m.content });
+          }
+        } else if (Array.isArray(m.content)) {
+          for (const item of m.content) {
+            if (item.type === 'text') {
+              parts.push({ text: item.text });
+            } else if (item.type === 'image_url' && item.image_url?.url) {
+              const match = item.image_url.url.match(/^data:(image\/\w+);base64,(.+)$/);
+              if (match) {
+                parts.push({
+                  inlineData: {
+                    mimeType: match[1],
+                    data: match[2],
+                  },
+                });
+              }
+            }
+          }
+        }
+
+        return { role, parts };
+      });
+
+    const callApi = async (targetModel) => {
+      return ai.models.generateContentStream({
+        model: targetModel,
+        contents: chatMessages,
+        config: {
+          systemInstruction: systemInstruction || undefined,
+          maxOutputTokens: options.maxTokens || 4096,
+        },
+      });
+    };
+
+    let response;
+    try {
+      response = await callApi(model);
+    } catch (err) {
+      if (err.message && (err.message.includes('404') || err.message.includes('429'))) {
+        console.warn(`Gemini model ${model} returned error. Retrying with fallback model gemini-3.6-flash...`);
+        response = await callApi('gemini-3.6-flash');
+      } else {
+        throw err;
+      }
+    }
 
     for await (const chunk of response) {
       const text = chunk.text;
@@ -63,7 +118,7 @@ class GeminiProvider extends BaseProvider {
     const mimeType = format === 'wav' ? 'audio/wav' : `audio/${format}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.6-flash',
       contents: [
         {
           parts: [

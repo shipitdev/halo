@@ -5,7 +5,15 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+let userDataPath;
+try {
+  const { app } = require('electron');
+  userDataPath = app && typeof app.getPath === 'function'
+    ? app.getPath('userData')
+    : path.join(process.env.HOME || process.env.USERPROFILE || '.', '.halo');
+} catch {
+  userDataPath = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.halo');
+}
 
 const CONFIG_FILENAME = 'halo-config.json';
 
@@ -25,7 +33,7 @@ const DEFAULT_CONFIG = {
 
 class ConfigManager {
   constructor() {
-    this.configPath = path.join(app.getPath('userData'), CONFIG_FILENAME);
+    this.configPath = path.join(userDataPath, CONFIG_FILENAME);
     this.data = {};
     this._load();
   }

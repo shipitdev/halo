@@ -104,7 +104,7 @@ test('getModel returns correct models', () => {
   assert(getModel('openai', true) === 'gpt-4o');
   assert(getModel('openai', false) === 'gpt-4o-mini');
   assert(getModel('anthropic', true) === 'claude-sonnet-4-20250514');
-  assert(getModel('gemini', false) === 'gemini-2.0-flash-lite');
+  assert(getModel('gemini', false) === 'gemini-3.5-flash');
 });
 
 // ─── Test Audio Module ──────────────────────────────────────────────────────

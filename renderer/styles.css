@@ -92,7 +92,14 @@ html, body {
   display: flex;
   align-items: center;
   gap: 4px;
-  -webkit-app-region: no-drag; /* Buttons clickable */
+  -webkit-app-region: no-drag !important;
+}
+
+button, input, select, textarea,
+button *, .toolbar-btn, .toolbar-btn *, .toolbar-icon-btn, .toolbar-icon-btn *,
+.quick-btn, .quick-btn *, .dropdown-wrapper, .dropdown-wrapper *,
+.dropdown-item, .dropdown-item *, .btn-primary, .btn-secondary {
+  -webkit-app-region: no-drag !important;
 }
 
 .toolbar-left { gap: 6px; padding-left: 6px; }
@@ -554,9 +561,134 @@ html, body {
   border-radius: var(--radius-pill);
   color: white; font-family: var(--font); font-size: 12px; font-weight: 600;
   cursor: pointer; transition: all var(--transition);
+  -webkit-app-region: no-drag !important;
 }
 
 .btn-primary:hover { box-shadow: 0 3px 16px var(--accent-glow); transform: translateY(-1px); }
+
+/* ─── Settings Hints & Knowledge Base Styles ─────────────────────────────── */
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.file-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+  display: inline-block;
+}
+
+.btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag !important;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  -webkit-app-region: no-drag !important;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+}
+
+.btn-danger-sm {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 50%;
+  color: #ef4444;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--transition);
+  -webkit-app-region: no-drag !important;
+}
+
+.btn-danger-sm:hover {
+  background: rgba(239, 68, 68, 0.3);
+  color: white;
+}
+
+.docs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.doc-tag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+  transition: border-color var(--transition);
+}
+
+.doc-tag:hover {
+  border-color: var(--border-accent);
+}
+
+.doc-tag .doc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 82%;
+  color: var(--text-secondary);
+}
+
+.doc-tag .btn-remove-doc {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: all var(--transition);
+  -webkit-app-region: no-drag !important;
+}
+
+.doc-tag .btn-remove-doc:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
 
 /* ─── Animations ─────────────────────────────────────────────────────────── */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -585,6 +717,76 @@ html, body {
 @keyframes cursor-blink {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0; }
+}
+
+/* ─── Dropdown Menu ───────────────────────────────────────────────────────── */
+.dropdown-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  -webkit-app-region: no-drag !important;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  width: 190px;
+  background: rgba(18, 24, 20, 0.95);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
+.dropdown-menu.hidden {
+  display: none !important;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition);
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dropdown-item span[data-icon] {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
 }
 
 /* ─── Utility ────────────────────────────────────────────────────────────── */

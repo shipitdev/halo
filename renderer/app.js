@@ -25,57 +25,86 @@
   };
 
   // ─── DOM References ─────────────────────────────────────────────────────
-  const $ = (id) => document.getElementById(id);
-  const dom = {
-    statusIndicator: $('status-indicator'),
-    statusDot: null,
-    statusText: null,
-    panel: $('halo-panel'),
-    responseArea: $('response-area'),
-    responseStream: $('response-stream'),
-    inputField: $('input-field'),
-    btnListen: $('btn-listen'),
-    btnSend: $('btn-send'),
-    btnAssist: $('btn-assist'),
-    btnSay: $('btn-say'),
-    btnFollowup: $('btn-followup'),
-    btnRecap: $('btn-recap'),
-    btnCode: $('btn-code'),
-    btnSettings: $('btn-settings'),
-    btnExpand: $('btn-expand'),
-    chevronIcon: $('chevron-icon'),
-    btnModelToggle: $('btn-model-toggle'),
-    modelLabel: null,
-    toast: $('halo-toast'),
-    toastContent: $('toast-content'),
-    toastDismiss: $('toast-dismiss'),
-    toastAccept: $('toast-accept'),
-    settingsOverlay: $('settings-overlay'),
-    settingsModal: $('settings-modal'),
-    btnCloseSettings: $('btn-close-settings'),
-    btnSaveSettings: $('btn-save-settings'),
-    selectProvider: $('select-provider'),
-    inputApiKey: $('input-api-key'),
-    selectSttProvider: $('select-stt-provider'),
-    inputSttKey: $('input-stt-key'),
-    hotkeyToggle: $('hotkey-toggle'),
-    hotkeyAssist: $('hotkey-assist'),
-    hotkeyCode: $('hotkey-code'),
-    hotkeyQuit: $('hotkey-quit'),
-  };
+  const dom = {};
+
+  function initDOM() {
+    const $ = (id) => document.getElementById(id);
+    dom.statusIndicator = $('status-indicator');
+    dom.statusDot = dom.statusIndicator ? dom.statusIndicator.querySelector('.status-dot') : null;
+    dom.statusText = dom.statusIndicator ? dom.statusIndicator.querySelector('.status-text') : null;
+    dom.panel = $('halo-panel');
+    dom.responseArea = $('response-area');
+    dom.responseStream = $('response-stream');
+    dom.inputField = $('input-field');
+    dom.btnListen = $('btn-listen');
+    dom.btnSend = $('btn-send');
+    dom.btnAssist = $('btn-assist');
+    dom.btnSay = $('btn-say');
+    dom.btnFollowup = $('btn-followup');
+    dom.btnRecap = $('btn-recap');
+    dom.btnCode = $('btn-code');
+    dom.btnSettings = $('btn-settings');
+    dom.btnExpand = $('btn-expand');
+    dom.chevronIcon = $('chevron-icon');
+    dom.btnModelToggle = $('btn-model-toggle');
+    dom.modelLabel = dom.btnModelToggle ? dom.btnModelToggle.querySelector('.model-label') : null;
+    dom.btnMore = $('btn-more');
+    dom.dropdownMenu = $('dropdown-menu');
+    dom.menuClear = $('menu-clear');
+    dom.menuCopy = $('menu-copy');
+    dom.menuClickthrough = $('menu-clickthrough');
+    dom.sessionTimer = $('session-timer');
+    dom.timerDisplay = $('timer-display');
+    dom.resumeFilename = $('resume-filename');
+    dom.btnUploadResume = $('btn-upload-resume');
+    dom.btnClearResume = $('btn-clear-resume');
+    dom.docsList = $('docs-list');
+    dom.btnUploadDocs = $('btn-upload-docs');
+    dom.toast = $('halo-toast');
+    dom.toastContent = $('toast-content');
+    dom.toastDismiss = $('toast-dismiss');
+    dom.toastAccept = $('toast-accept');
+    dom.settingsOverlay = $('settings-overlay');
+    dom.settingsModal = $('settings-modal');
+    dom.btnCloseSettings = $('btn-close-settings');
+    dom.btnSaveSettings = $('btn-save-settings');
+    dom.selectProvider = $('select-provider');
+    dom.inputApiKey = $('input-api-key');
+    dom.selectSttProvider = $('select-stt-provider');
+    dom.inputSttKey = $('input-stt-key');
+    dom.hotkeyToggle = $('hotkey-toggle');
+    dom.hotkeyAssist = $('hotkey-assist');
+    dom.hotkeyCode = $('hotkey-code');
+    dom.hotkeyQuit = $('hotkey-quit');
+  }
 
   // ─── Initialization ─────────────────────────────────────────────────────
   let isExpanded = false;
+  let isClickthrough = false;
+  let sessionSeconds = 0;
+  let sessionTimerInterval = null;
   const TOOLBAR_H = 48;
 
   async function init() {
-    dom.statusDot = dom.statusIndicator.querySelector('.status-dot');
-    dom.statusText = dom.statusIndicator.querySelector('.status-text');
-    dom.modelLabel = dom.btnModelToggle.querySelector('.model-label');
-
+    initDOM();
     await loadSettings();
     bindEvents();
     bindIPCListeners();
+    startSessionTimer();
+  }
+
+  // ─── Session Timer ──────────────────────────────────────────────────────
+  function startSessionTimer() {
+    if (dom.sessionTimer) dom.sessionTimer.classList.remove('hidden');
+    if (sessionTimerInterval) clearInterval(sessionTimerInterval);
+    sessionTimerInterval = setInterval(() => {
+      sessionSeconds++;
+      const m = Math.floor(sessionSeconds / 60);
+      const s = sessionSeconds % 60;
+      if (dom.timerDisplay) {
+        dom.timerDisplay.textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
+      }
+    }, 1000);
   }
 
   // ─── Settings ───────────────────────────────────────────────────────────
@@ -113,56 +142,240 @@
     closeSettings();
   }
 
-  function openSettings() {
+  async function openSettings() {
     dom.selectProvider.value = state.provider;
     dom.inputApiKey.value = state.apiKey;
     dom.selectSttProvider.value = state.sttProvider;
     dom.inputSttKey.value = state.sttApiKey;
+    await renderResumeUI();
+    await renderDocsUI();
     dom.settingsOverlay.classList.remove('hidden');
+
+    // Auto-scale overlay window so Settings modal is fully visible
+    requestAnimationFrame(() => {
+      const modalH = dom.settingsModal ? dom.settingsModal.offsetHeight : 480;
+      window.halo.resize(Math.max(520, modalH + 40));
+    });
   }
 
   function closeSettings() {
     dom.settingsOverlay.classList.add('hidden');
+    const panelH = isExpanded ? dom.panel.scrollHeight : 0;
+    window.halo.resize(TOOLBAR_H + panelH);
+  }
+
+  // ─── Knowledge Base UI ──────────────────────────────────────────────────
+  async function renderResumeUI() {
+    if (!window.halo.knowledge) return;
+    try {
+      const resume = await window.halo.knowledge.getResume();
+      if (resume && resume.filename) {
+        if (dom.resumeFilename) dom.resumeFilename.textContent = resume.filename;
+        if (dom.btnClearResume) dom.btnClearResume.classList.remove('hidden');
+      } else {
+        if (dom.resumeFilename) dom.resumeFilename.textContent = 'No resume uploaded';
+        if (dom.btnClearResume) dom.btnClearResume.classList.add('hidden');
+      }
+    } catch (err) {
+      console.error('Failed to load resume info:', err);
+    }
+  }
+
+  async function handleUploadResume() {
+    if (!window.halo.knowledge) return;
+    try {
+      const resume = await window.halo.knowledge.uploadResume();
+      if (resume) {
+        await renderResumeUI();
+        showToast(`Resume uploaded: ${resume.filename}`);
+      }
+    } catch (err) {
+      console.error('Failed to upload resume:', err);
+    }
+  }
+
+  async function handleClearResume() {
+    if (!window.halo.knowledge) return;
+    try {
+      await window.halo.knowledge.clearResume();
+      await renderResumeUI();
+      showToast('Resume removed');
+    } catch (err) {
+      console.error('Failed to clear resume:', err);
+    }
+  }
+
+  async function renderDocsUI() {
+    if (!window.halo.knowledge || !dom.docsList) return;
+    try {
+      const docs = await window.halo.knowledge.listDocuments();
+      dom.docsList.innerHTML = '';
+      if (!docs || docs.length === 0) {
+        dom.docsList.innerHTML = '<span class="file-label">No documents added</span>';
+        return;
+      }
+      docs.forEach((d) => {
+        const tag = document.createElement('div');
+        tag.className = 'doc-tag';
+        tag.style.cssText = 'display:flex; align-items:center; justify-content:space-between; padding:4px 8px; margin-bottom:4px; background:rgba(255,255,255,0.05); border-radius:4px; font-size:12px;';
+        tag.innerHTML = `
+          <span class="doc-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">${escapeHtml(d.filename)}</span>
+          <button class="btn-remove-doc" data-id="${d.id}" title="Remove" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px;">✕</button>
+        `;
+        tag.querySelector('.btn-remove-doc').addEventListener('click', async () => {
+          await window.halo.knowledge.removeDocument(d.id);
+          await renderDocsUI();
+        });
+        dom.docsList.appendChild(tag);
+      });
+    } catch (err) {
+      console.error('Failed to list docs:', err);
+    }
+  }
+
+  async function handleUploadDocs() {
+    if (!window.halo.knowledge) return;
+    try {
+      const added = await window.halo.knowledge.uploadDocuments();
+      if (added && added.length > 0) {
+        await renderDocsUI();
+        showToast(`Added ${added.length} document(s)`);
+      }
+    } catch (err) {
+      console.error('Failed to upload docs:', err);
+    }
+  }
+
+  // ─── Dropdown Menu ──────────────────────────────────────────────────────
+  function toggleDropdown() {
+    if (dom.dropdownMenu) dom.dropdownMenu.classList.toggle('hidden');
+  }
+
+  function closeDropdown() {
+    if (dom.dropdownMenu) dom.dropdownMenu.classList.add('hidden');
+  }
+
+  function handleClearConversation() {
+    state.conversationHistory = [];
+    state.transcriptBuffer = '';
+    if (dom.responseStream) dom.responseStream.innerHTML = '';
+    collapsePanel();
+    showToast('Conversation cleared');
+    closeDropdown();
+  }
+
+  async function handleCopyLastAnswer() {
+    const lastAssistant = [...state.conversationHistory].reverse().find((m) => m.role === 'assistant');
+    if (lastAssistant && lastAssistant.content) {
+      try {
+        await navigator.clipboard.writeText(lastAssistant.content);
+        showToast('Last answer copied to clipboard');
+      } catch (err) {
+        showToast('Failed to copy to clipboard');
+      }
+    } else {
+      showToast('No answer available to copy');
+    }
+    closeDropdown();
+  }
+
+  function handleToggleClickthrough() {
+    isClickthrough = !isClickthrough;
+    window.halo.setIgnoreMouseEvents(isClickthrough);
+    showToast(isClickthrough ? 'Click-through enabled' : 'Click-through disabled');
+    closeDropdown();
   }
 
   // ─── Event Binding ──────────────────────────────────────────────────────
   function bindEvents() {
     // Input
-    dom.inputField.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        handleSend();
-      }
-    });
-    dom.btnSend.addEventListener('click', handleSend);
+    if (dom.inputField) {
+      dom.inputField.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSend();
+        }
+      });
+    }
+    if (dom.btnSend) dom.btnSend.addEventListener('click', handleSend);
 
     // Listen toggle
-    dom.btnListen.addEventListener('click', toggleListening);
+    if (dom.btnListen) dom.btnListen.addEventListener('click', toggleListening);
 
     // Action buttons
-    dom.btnAssist.addEventListener('click', () => triggerAction('assist'));
-    dom.btnSay.addEventListener('click', () => triggerAction('say'));
-    dom.btnFollowup.addEventListener('click', () => triggerAction('followup'));
-    dom.btnRecap.addEventListener('click', () => triggerAction('recap'));
-    dom.btnCode.addEventListener('click', () => triggerAction('solveCode'));
+    if (dom.btnAssist) dom.btnAssist.addEventListener('click', () => triggerAction('assist'));
+    if (dom.btnSay) dom.btnSay.addEventListener('click', () => triggerAction('say'));
+    if (dom.btnFollowup) dom.btnFollowup.addEventListener('click', () => triggerAction('followup'));
+    if (dom.btnRecap) dom.btnRecap.addEventListener('click', () => triggerAction('recap'));
+    if (dom.btnCode) dom.btnCode.addEventListener('click', () => triggerAction('solveCode'));
 
     // Model toggle
-    dom.btnModelToggle.addEventListener('click', toggleModel);
+    if (dom.btnModelToggle) dom.btnModelToggle.addEventListener('click', toggleModel);
 
-    // Settings
-    dom.btnSettings.addEventListener('click', openSettings);
-    dom.btnCloseSettings.addEventListener('click', closeSettings);
-    dom.btnSaveSettings.addEventListener('click', saveSettings);
-    dom.settingsOverlay.addEventListener('click', (e) => {
-      if (e.target === dom.settingsOverlay) closeSettings();
+    // Three-dot dropdown menu
+    if (dom.btnMore) {
+      dom.btnMore.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleDropdown();
+      });
+    }
+    document.addEventListener('click', (e) => {
+      if (dom.dropdownMenu && !dom.dropdownMenu.contains(e.target) && e.target !== dom.btnMore) {
+        closeDropdown();
+      }
     });
 
+    if (dom.menuClear) {
+      dom.menuClear.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleClearConversation();
+      });
+    }
+    if (dom.menuCopy) {
+      dom.menuCopy.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleCopyLastAnswer();
+      });
+    }
+    if (dom.menuClickthrough) {
+      dom.menuClickthrough.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleToggleClickthrough();
+      });
+    }
+
+    // Toolbar mouse hover handling for click-through mode
+    const toolbarEl = document.getElementById('halo-toolbar');
+    if (toolbarEl) {
+      toolbarEl.addEventListener('mouseenter', () => {
+        if (isClickthrough) window.halo.setIgnoreMouseEvents(false);
+      });
+      toolbarEl.addEventListener('mouseleave', () => {
+        if (isClickthrough) window.halo.setIgnoreMouseEvents(true, { forward: true });
+      });
+    }
+
+    // Resume & Knowledge Base UI
+    if (dom.btnUploadResume) dom.btnUploadResume.addEventListener('click', handleUploadResume);
+    if (dom.btnClearResume) dom.btnClearResume.addEventListener('click', handleClearResume);
+    if (dom.btnUploadDocs) dom.btnUploadDocs.addEventListener('click', handleUploadDocs);
+
+    // Settings
+    if (dom.btnSettings) dom.btnSettings.addEventListener('click', openSettings);
+    if (dom.btnCloseSettings) dom.btnCloseSettings.addEventListener('click', closeSettings);
+    if (dom.btnSaveSettings) dom.btnSaveSettings.addEventListener('click', saveSettings);
+    if (dom.settingsOverlay) {
+      dom.settingsOverlay.addEventListener('click', (e) => {
+        if (e.target === dom.settingsOverlay) closeSettings();
+      });
+    }
+
     // Expand / Collapse
-    dom.btnExpand.addEventListener('click', togglePanel);
+    if (dom.btnExpand) dom.btnExpand.addEventListener('click', togglePanel);
 
     // Toast
-    dom.toastDismiss.addEventListener('click', hideToast);
-    dom.toastAccept.addEventListener('click', hideToast);
+    if (dom.toastDismiss) dom.toastDismiss.addEventListener('click', hideToast);
+    if (dom.toastAccept) dom.toastAccept.addEventListener('click', hideToast);
 
     // Hotkey recording
     document.querySelectorAll('.hotkey-input').forEach((input) => {
@@ -216,6 +429,13 @@
     window.halo.onOpenSettings(() => {
       openSettings();
     });
+
+    // Meeting detection
+    if (window.halo.onMeetingDetected) {
+      window.halo.onMeetingDetected((meeting) => {
+        showToast(`Meeting detected: ${meeting.name} — Halo active`);
+      });
+    }
   }
 
   // ─── Model Toggle ──────────────────────────────────────────────────────
@@ -252,17 +472,32 @@
     isExpanded = false;
     dom.panel.classList.add('collapsed');
     dom.chevronIcon.style.transform = 'rotate(0deg)';
+    lastResizedH = TOOLBAR_H;
     window.halo.resize(TOOLBAR_H);
   }
 
-  /** Auto-expand when content arrives and resize to fit. */
+  /** Auto-expand when content arrives and resize window height dynamically. */
+  let lastResizedH = 0;
+  let isResizeScheduled = false;
+
   function autoExpand() {
-    if (!isExpanded) expandPanel();
-    // Re-measure after content renders
+    if (!isExpanded) {
+      isExpanded = true;
+      dom.panel.classList.remove('collapsed');
+      dom.chevronIcon.style.transform = 'rotate(180deg)';
+    }
+
+    if (isResizeScheduled) return;
+    isResizeScheduled = true;
+
     requestAnimationFrame(() => {
-      const contentH = dom.panel.scrollHeight;
+      isResizeScheduled = false;
+      const contentH = dom.panel ? (dom.panel.offsetHeight || dom.panel.scrollHeight) : 0;
       const totalH = TOOLBAR_H + contentH;
-      window.halo.resize(totalH);
+      if (Math.abs(totalH - lastResizedH) >= 2) {
+        lastResizedH = totalH;
+        window.halo.resize(totalH);
+      }
     });
   }
 
@@ -290,7 +525,7 @@
     dom.statusText.textContent = text;
   }
 
-  // ─── Listening (Microphone) ─────────────────────────────────────────────
+  // ─── Listening (Microphone with Valid WebM Headers) ──────────────────────
   async function toggleListening() {
     if (state.isListening) {
       stopListening();
@@ -311,158 +546,97 @@
       });
 
       state.micStream = stream;
-      state.micRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm',
-      });
-
-      state.audioChunks = [];
-
-      state.micRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          state.audioChunks.push(event.data);
-        }
-      };
-
-      state.micRecorder.start(1000); // Collect chunks every second
-
       state.isListening = true;
       dom.btnListen.classList.add('active');
       setStatus('listening', 'Listening');
       window.halo.setListeningState(true);
 
-      // Periodic transcription
+      startRecordingSlice();
+
+      // Transcribe completed slices every 4 seconds
       state.audioChunkInterval = setInterval(() => {
-        processAudioChunks();
-      }, 5000);
+        cycleRecordingSlice();
+      }, 4000);
     } catch (err) {
       console.error('Microphone access failed:', err);
       setStatus('error', 'Mic Error');
     }
   }
 
+  function startRecordingSlice() {
+    if (!state.micStream || !state.isListening) return;
+
+    try {
+      state.audioChunks = [];
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+
+      const recorder = new MediaRecorder(state.micStream, { mimeType });
+      state.micRecorder = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          state.audioChunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        if (state.audioChunks.length > 0) {
+          const blob = new Blob(state.audioChunks, { type: mimeType });
+          state.audioChunks = [];
+          await processAudioBlob(blob);
+        }
+      };
+
+      recorder.start();
+    } catch (err) {
+      console.error('Failed to start MediaRecorder slice:', err);
+    }
+  }
+
+  function cycleRecordingSlice() {
+    if (state.micRecorder && state.micRecorder.state === 'recording') {
+      const oldRecorder = state.micRecorder;
+      startRecordingSlice(); // Start new standalone slice first
+      oldRecorder.stop(); // Stop old slice to produce valid EBML container
+    }
+  }
+
   function stopListening() {
-    if (state.micRecorder && state.micRecorder.state !== 'inactive') {
-      state.micRecorder.stop();
-    }
-    if (state.micStream) {
-      state.micStream.getTracks().forEach((t) => t.stop());
-      state.micStream = null;
-    }
+    state.isListening = false;
     if (state.audioChunkInterval) {
       clearInterval(state.audioChunkInterval);
       state.audioChunkInterval = null;
     }
 
-    // Process any remaining audio
-    if (state.audioChunks.length > 0) {
-      processAudioChunks();
+    if (state.micRecorder && state.micRecorder.state !== 'inactive') {
+      state.micRecorder.stop();
     }
 
-    state.isListening = false;
-    state.micRecorder = null;
+    if (state.micStream) {
+      state.micStream.getTracks().forEach((t) => t.stop());
+      state.micStream = null;
+    }
+
     dom.btnListen.classList.remove('active');
     setStatus('idle', 'Idle');
     window.halo.setListeningState(false);
   }
 
-  async function processAudioChunks() {
-    if (state.audioChunks.length === 0) return;
-
-    const chunks = [...state.audioChunks];
-    state.audioChunks = [];
-
+  async function processAudioBlob(blob) {
+    if (!blob || blob.size < 100) return;
     try {
-      const blob = new Blob(chunks, { type: 'audio/webm' });
       const arrayBuffer = await blob.arrayBuffer();
-      const base64Audio = arrayBufferToBase64(arrayBuffer);
-
-      // Send to transcription
-      const transcript = await transcribeAudio(base64Audio);
+      const transcript = await window.halo.transcribeAudio(arrayBuffer, 'webm');
       if (transcript && transcript.trim()) {
-        state.transcriptBuffer += ' ' + transcript.trim();
-        showTranscript(transcript.trim());
+        const text = transcript.trim();
+        state.transcriptBuffer += ' ' + text;
+        showToast(`🎤 "${text}"`);
       }
     } catch (err) {
-      console.error('Audio processing failed:', err);
+      console.error('Audio transcription failed:', err.message);
     }
-  }
-
-  // ─── Transcription ─────────────────────────────────────────────────────
-  async function transcribeAudio(base64Audio) {
-    const provider = state.sttProvider;
-    const apiKey = state.sttApiKey || state.apiKey;
-
-    if (!apiKey) {
-      console.warn('No API key for transcription');
-      return null;
-    }
-
-    try {
-      if (provider === 'openai') {
-        return await transcribeWithWhisper(base64Audio, apiKey);
-      } else if (provider === 'gemini') {
-        return await transcribeWithGemini(base64Audio, apiKey);
-      }
-    } catch (err) {
-      console.error('Transcription failed:', err);
-      return null;
-    }
-  }
-
-  async function transcribeWithWhisper(base64Audio, apiKey) {
-    const binaryString = atob(base64Audio);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    const blob = new Blob([bytes], { type: 'audio/webm' });
-    const formData = new FormData();
-    formData.append('file', blob, 'audio.webm');
-    formData.append('model', 'whisper-1');
-
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: formData,
-    });
-
-    if (!res.ok) throw new Error(`Whisper API error: ${res.status}`);
-    const data = await res.json();
-    return data.text;
-  }
-
-  async function transcribeWithGemini(base64Audio, apiKey) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: 'audio/webm',
-                    data: base64Audio,
-                  },
-                },
-                {
-                  text: 'Transcribe this audio accurately. Return only the transcription, no commentary.',
-                },
-              ],
-            },
-          ],
-        }),
-      }
-    );
-
-    if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   }
 
   // ─── Actions ────────────────────────────────────────────────────────────
@@ -477,8 +651,12 @@
   async function triggerAction(action) {
     if (state.isProcessing) return;
 
-    // Capture screenshot for visual context
-    const screenshot = await window.halo.captureScreen();
+    let screenshot = null;
+    try {
+      screenshot = await window.halo.captureScreen();
+    } catch (err) {
+      console.warn('Screen capture failed, proceeding without screenshot:', err);
+    }
 
     const transcript = state.transcriptBuffer.trim();
     const inputText = dom.inputField.value.trim();
@@ -504,6 +682,7 @@
 
     state.isProcessing = true;
     setStatus('thinking', 'Thinking');
+    lastResizedH = 0;
     autoExpand();
 
     // Build messages
@@ -534,7 +713,7 @@
     bodyEl.classList.add('streaming-cursor');
 
     try {
-      const fullResponse = await streamAIResponse(messages, bodyEl);
+      const fullResponse = await streamAIResponse(messages, bodyEl, context?.screenshot);
 
       // Store in history
       state.conversationHistory.push(
@@ -576,178 +755,39 @@
     return parts.join('\n\n') || 'Analyze the current screen and provide assistance.';
   }
 
-  // ─── AI Streaming ──────────────────────────────────────────────────────
-  async function streamAIResponse(messages, targetEl) {
-    const provider = state.provider;
-    const apiKey = state.apiKey;
-    const model = getModel(provider, state.useSmart);
-
-    let fullText = '';
-
-    if (provider === 'openai') {
-      fullText = await streamOpenAI(messages, model, apiKey, targetEl);
-    } else if (provider === 'anthropic') {
-      fullText = await streamAnthropic(messages, model, apiKey, targetEl);
-    } else if (provider === 'gemini') {
-      fullText = await streamGemini(messages, model, apiKey, targetEl);
-    }
-
-    return fullText;
-  }
-
-  function getModel(provider, smart) {
-    const models = {
-      openai: { smart: 'gpt-4o', fast: 'gpt-4o-mini' },
-      anthropic: { smart: 'claude-sonnet-4-20250514', fast: 'claude-haiku-3-20250317' },
-      gemini: { smart: 'gemini-2.0-flash', fast: 'gemini-2.0-flash-lite' },
-    };
-    return models[provider]?.[smart ? 'smart' : 'fast'] || 'gpt-4o';
-  }
-
-  async function streamOpenAI(messages, model, apiKey, targetEl) {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: true,
-        max_tokens: 4096,
-      }),
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text();
-      throw new Error(`OpenAI ${res.status}: ${errBody}`);
-    }
-
-    return await processSSEStream(res.body, targetEl, (data) => {
-      return data.choices?.[0]?.delta?.content || '';
-    });
-  }
-
-  async function streamAnthropic(messages, model, apiKey, targetEl) {
-    // Anthropic uses a separate system parameter
-    const systemMsg = messages.find((m) => m.role === 'system');
-    const chatMessages = messages.filter((m) => m.role !== 'system');
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system: systemMsg?.content || '',
-        messages: chatMessages,
-        stream: true,
-      }),
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text();
-      throw new Error(`Anthropic ${res.status}: ${errBody}`);
-    }
-
-    return await processSSEStream(res.body, targetEl, (data) => {
-      if (data.type === 'content_block_delta') {
-        return data.delta?.text || '';
-      }
-      return '';
-    });
-  }
-
-  async function streamGemini(messages, model, apiKey, targetEl) {
-    // Convert to Gemini format
-    const systemMsg = messages.find((m) => m.role === 'system');
-    const chatMessages = messages.filter((m) => m.role !== 'system');
-
-    const contents = chatMessages.map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
-
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents,
-          systemInstruction: systemMsg
-            ? { parts: [{ text: systemMsg.content }] }
-            : undefined,
-          generationConfig: {
-            maxOutputTokens: 4096,
-          },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const errBody = await res.text();
-      throw new Error(`Gemini ${res.status}: ${errBody}`);
-    }
-
-    return await processSSEStream(res.body, targetEl, (data) => {
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    });
-  }
-
-  /**
-   * Generic SSE stream processor.
-   */
-  async function processSSEStream(readableStream, targetEl, extractContent) {
-    const reader = readableStream.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') continue;
-
-          try {
-            const data = JSON.parse(jsonStr);
-            const content = extractContent(data);
-            if (content) {
-              fullText += content;
-              renderMarkdown(targetEl, fullText);
-              scrollToBottom();
-            }
-          } catch (parseErr) {
-            // Skip malformed JSON chunks
-          }
+  // ─── AI Streaming via IPC Bridge ───────────────────────────────────────
+  async function streamAIResponse(messages, targetEl, screenshot) {
+    return new Promise((resolve, reject) => {
+      let fullText = '';
+      window.halo.streamAI(
+        { messages, screenshot },
+        (chunk) => {
+          fullText += chunk;
+          renderMarkdown(targetEl, fullText);
+          scrollToBottom();
+          autoExpand();
+        },
+        (finalText) => {
+          resolve(finalText);
+        },
+        (err) => {
+          reject(err);
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-
-    return fullText;
+      );
+    });
   }
 
   // ─── Markdown Rendering (Lightweight) ──────────────────────────────────
   function renderMarkdown(el, text) {
-    // Simple markdown to HTML conversion
-    let html = escapeHtml(text);
+    let source = text || '';
+
+    // Handle unclosed code block during live streaming
+    const codeBlockCount = (source.match(/```/g) || []).length;
+    if (codeBlockCount % 2 !== 0) {
+      source += '\n```';
+    }
+
+    let html = escapeHtml(source);
 
     // Code blocks (```...```)
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>');

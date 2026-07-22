@@ -47,11 +47,10 @@ class OpenAIProvider extends BaseProvider {
    */
   async transcribe(audioBuffer, format = 'webm') {
     const OpenAI = require('openai');
+    const { toFile } = OpenAI;
     const client = new OpenAI({ apiKey: this.apiKey });
-    const { Readable } = require('stream');
 
-    // Convert Buffer to a File-like object
-    const file = new File([audioBuffer], `audio.${format}`, {
+    const file = await toFile(audioBuffer, `audio.${format}`, {
       type: `audio/${format}`,
     });
 

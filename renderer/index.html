@@ -23,7 +23,7 @@
       </div>
 
       <div class="toolbar-center">
-        <button id="btn-assist" class="toolbar-btn accent" title="AI Assist">
+        <button id="btn-assist" class="toolbar-btn accent" title="AI Answer">
           <span data-icon="assist"></span>
           <span>AI Answer</span>
         </button>
@@ -31,17 +31,43 @@
           <span data-icon="code"></span>
           <span>Analyze Screen</span>
         </button>
-        <button id="btn-say" class="toolbar-btn" title="What Should I Say">
+        <button id="btn-say" class="toolbar-btn" title="Chat">
           <span data-icon="say"></span>
           <span>Chat</span>
         </button>
       </div>
 
       <div class="toolbar-right">
+        <!-- Session Timer -->
+        <div id="session-timer" class="timer-badge hidden" title="Session Duration">
+          <span data-icon="timer"></span>
+          <span id="timer-display">0:00</span>
+        </div>
+
         <div id="status-indicator" class="status-idle" title="Idle">
           <span class="status-dot"></span>
           <span class="status-text">idle</span>
         </div>
+
+        <!-- Three-dot Menu -->
+        <div class="dropdown-wrapper">
+          <button id="btn-more" class="toolbar-icon-btn" title="More" aria-label="More options">
+            <span data-icon="more"></span>
+          </button>
+          <div id="dropdown-menu" class="dropdown-menu hidden">
+            <button id="menu-clear" class="dropdown-item">
+              <span data-icon="close"></span> Clear Conversation
+            </button>
+            <button id="menu-copy" class="dropdown-item">
+              <span data-icon="copy"></span> Copy Last Answer
+            </button>
+            <div class="dropdown-divider"></div>
+            <button id="menu-clickthrough" class="dropdown-item">
+              <span data-icon="minimize"></span> Toggle Click-Through
+            </button>
+          </div>
+        </div>
+
         <button id="btn-settings" class="toolbar-icon-btn" title="Settings" aria-label="Settings">
           <span data-icon="settings"></span>
         </button>
@@ -90,7 +116,7 @@
 
     </div>
 
-    <!-- ─── Notification Toast (shows briefly above toolbar) ───────── -->
+    <!-- ─── Notification Toast ─────────────────────────────────────── -->
     <div id="halo-toast" class="hidden">
       <div id="toast-content"></div>
       <div id="toast-actions">
@@ -109,6 +135,8 @@
           </button>
         </div>
         <div class="modal-body">
+
+          <!-- AI Provider -->
           <section class="settings-section">
             <h3>AI Provider</h3>
             <div class="setting-row">
@@ -124,6 +152,8 @@
               <input id="input-api-key" type="password" placeholder="sk-..." autocomplete="off" />
             </div>
           </section>
+
+          <!-- Transcription -->
           <section class="settings-section">
             <h3>Transcription</h3>
             <div class="setting-row">
@@ -138,6 +168,33 @@
               <input id="input-stt-key" type="password" placeholder="(same if same provider)" autocomplete="off" />
             </div>
           </section>
+
+          <!-- Resume Upload -->
+          <section class="settings-section">
+            <h3>Resume</h3>
+            <p class="settings-hint">Upload your resume for tailored interview responses.</p>
+            <div class="setting-row">
+              <span id="resume-filename" class="file-label">No resume uploaded</span>
+              <div class="btn-group">
+                <button id="btn-upload-resume" class="btn-secondary">Upload</button>
+                <button id="btn-clear-resume" class="btn-danger-sm hidden">✕</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Knowledge Base -->
+          <section class="settings-section">
+            <h3>Knowledge Base</h3>
+            <p class="settings-hint">Upload notes, docs, or study materials the AI can reference.</p>
+            <div id="docs-list" class="docs-list">
+              <!-- Populated dynamically -->
+            </div>
+            <button id="btn-upload-docs" class="btn-secondary">
+              <span data-icon="upload"></span> Add Documents
+            </button>
+          </section>
+
+          <!-- Hotkeys -->
           <section class="settings-section">
             <h3>Hotkeys</h3>
             <div class="setting-row">
@@ -157,6 +214,7 @@
               <input id="hotkey-quit" class="hotkey-input" type="text" value="Cmd+Shift+X" readonly />
             </div>
           </section>
+
         </div>
         <div class="modal-footer">
           <button id="btn-save-settings" class="btn-primary">Save</button>
