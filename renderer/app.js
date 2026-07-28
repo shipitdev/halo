@@ -117,6 +117,12 @@
         state.sttProvider = config.sttProvider || 'openai';
         state.sttApiKey = config.sttApiKey || '';
         state.useSmart = config.useSmart !== false;
+        state.hotkeys = config.hotkeys || {
+          toggleOverlay: 'CommandOrControl+B',
+          assist: 'CommandOrControl+Return',
+          solveCode: 'CommandOrControl+Shift+H',
+          quit: 'CommandOrControl+Shift+X',
+        };
       }
     } catch (err) {
       console.warn('Failed to load settings:', err);
@@ -129,12 +135,21 @@
     state.sttProvider = dom.selectSttProvider.value;
     state.sttApiKey = dom.inputSttKey.value;
 
+    const newHotkeys = {
+      toggleOverlay: dom.hotkeyToggle ? dom.hotkeyToggle.value : 'CommandOrControl+B',
+      assist: dom.hotkeyAssist ? dom.hotkeyAssist.value : 'CommandOrControl+Return',
+      solveCode: dom.hotkeyCode ? dom.hotkeyCode.value : 'CommandOrControl+Shift+H',
+      quit: dom.hotkeyQuit ? dom.hotkeyQuit.value : 'CommandOrControl+Shift+X',
+    };
+    state.hotkeys = newHotkeys;
+
     try {
       await window.halo.settings.set('provider', state.provider);
       await window.halo.settings.set('apiKey', state.apiKey);
       await window.halo.settings.set('sttProvider', state.sttProvider);
       await window.halo.settings.set('sttApiKey', state.sttApiKey);
       await window.halo.settings.set('useSmart', state.useSmart);
+      await window.halo.settings.set('hotkeys', state.hotkeys);
     } catch (err) {
       console.error('Failed to save settings:', err);
     }
@@ -147,6 +162,14 @@
     dom.inputApiKey.value = state.apiKey;
     dom.selectSttProvider.value = state.sttProvider;
     dom.inputSttKey.value = state.sttApiKey;
+
+    if (state.hotkeys) {
+      if (dom.hotkeyToggle && state.hotkeys.toggleOverlay) dom.hotkeyToggle.value = state.hotkeys.toggleOverlay;
+      if (dom.hotkeyAssist && state.hotkeys.assist) dom.hotkeyAssist.value = state.hotkeys.assist;
+      if (dom.hotkeyCode && state.hotkeys.solveCode) dom.hotkeyCode.value = state.hotkeys.solveCode;
+      if (dom.hotkeyQuit && state.hotkeys.quit) dom.hotkeyQuit.value = state.hotkeys.quit;
+    }
+
     await renderResumeUI();
     await renderDocsUI();
     dom.settingsOverlay.classList.remove('hidden');

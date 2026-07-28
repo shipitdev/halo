@@ -97,7 +97,7 @@ router.post('/chat', requireAuth, async (req, res) => {
         }));
 
       const response = await ai.models.generateContentStream({
-        model: model || 'gemini-2.0-flash',
+        model: model || 'gemini-3.6-flash',
         contents: chatMessages,
         config: {
           systemInstruction: systemMsg ? systemMsg.content : undefined,
@@ -152,7 +152,8 @@ router.post('/transcribe', requireAuth, async (req, res) => {
 
     if (provider === 'openai') {
       const client = getOpenAI();
-      const file = new File([audioBuffer], `audio.${format}`, {
+      const { toFile } = require('openai');
+      const file = await toFile(audioBuffer, `audio.${format}`, {
         type: `audio/${format}`,
       });
 
@@ -164,7 +165,7 @@ router.post('/transcribe', requireAuth, async (req, res) => {
     } else if (provider === 'gemini') {
       const ai = getGemini();
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3.6-flash',
         contents: [
           {
             parts: [

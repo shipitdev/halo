@@ -334,9 +334,10 @@ function setupIPC() {
   // ─── AI Provider & STT IPC ──────────────────────────────────────────
   ipcMain.on('halo:stream-ai', async (event, payload) => {
     const { id, messages = [], screenshot } = payload;
+    let providerName = 'openai';
 
     try {
-      const providerName = config.get('provider', 'openai');
+      providerName = config.get('provider', 'openai');
       const apiKey = config.get('apiKey', '');
       const useSmart = config.get('useSmart', true);
 
@@ -414,17 +415,33 @@ function setupIPC() {
   ipcMain.handle('halo:transcribe-audio', async (_event, audioBuffer, format = 'webm') => {
     try {
       const sttProviderName = config.get('sttProvider', 'openai');
-      const sttApiKey = config.get('sttApiKey') || config.get('apiKey');
-
-      if (!sttApiKey) {
-        throw new Error('STT API key is not configured.');
-      }
+      let sttApiKey = config.get('sttApiKey') || (sttProviderName === config.get('provider') ? config.get('apiKey') : '');
 
       const buf = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
-      const provider = createProvider(sttProviderName, sttApiKey);
+      let provider = null;
 
-      if (!provider.supportsTranscription()) {
-        throw new Error(`Provider "${sttProviderName}" does not support speech transcription.`);
+      if (sttApiKey) {
+        try {
+          const p = createProvider(sttProviderName, sttApiKey);
+          if (p.supportsTranscription()) provider = p;
+        } catch {
+          // ignore instantiation failure
+        }
+      }
+
+      // Fallback: try getTranscriptionProvider with available keys
+      if (!provider) {
+        const primaryProvider = config.get('provider');
+        const primaryKey = config.get('apiKey');
+        const configs = {
+          openai: { apiKey: sttProviderName === 'openai' ? sttApiKey : (primaryProvider === 'openai' ? primaryKey : '') },
+          gemini: { apiKey: sttProviderName === 'gemini' ? sttApiKey : (primaryProvider === 'gemini' ? primaryKey : '') },
+        };
+        provider = getTranscriptionProvider(configs);
+      }
+
+      if (!provider) {
+        throw new Error(`Provider "${sttProviderName}" does not support speech transcription. Please configure OpenAI or Gemini API key in Settings.`);
       }
 
       return await provider.transcribe(buf, format);
