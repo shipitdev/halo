@@ -20,6 +20,7 @@ const { ConfigManager } = require('./src/config');
 const { KnowledgeBase } = require('./src/knowledge');
 const { MeetingDetector } = require('./src/meetings');
 const { createProvider, getTranscriptionProvider, getModel } = require('./src/providers');
+const { getPrompt } = require('./src/prompts');
 
 // ─── Globals ────────────────────────────────────────────────────────────────
 let mainWindow = null;
@@ -329,6 +330,12 @@ function setupIPC() {
 
   ipcMain.handle('halo:get-active-meeting', () => {
     return meetingDetector ? meetingDetector.getActiveMeeting() : null;
+  });
+
+  // ─── System Prompts IPC ─────────────────────────────────────────────
+
+  ipcMain.handle('halo:get-prompt', (_event, action) => {
+    return getPrompt(action);
   });
 
   // ─── AI Provider & STT IPC ──────────────────────────────────────────

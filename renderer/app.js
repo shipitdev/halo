@@ -7,7 +7,118 @@
 ;(function () {
   'use strict';
 
+  // ─── Constants ──────────────────────────────────────────────────────────
+  const MAX_TRANSCRIPT_ENTRIES = 50;
+  const MAX_CONVERSATION_HISTORY = 20;
+  const DEDUP_SIMILARITY_THRESHOLD = 0.6;
+
+  // ─── Transcript Manager ─────────────────────────────────────────────────
+  /**
+   * Manages timestamped transcript entries with deduplication and meeting context.
+   * Replaces the flat transcriptBuffer string for richer LLM context.
+   */
+  class TranscriptManager {
+    constructor(maxEntries = MAX_TRANSCRIPT_ENTRIES) {
+      this.entries = []; // { text, timestamp, meetingContext }
+      this.maxEntries = maxEntries;
+      this.activeMeeting = null; // { id, name } or null
+    }
+
+    /**
+     * Add a new transcript chunk with deduplication.
+     * If the new chunk overlaps significantly with the last entry, merge instead of appending.
+     */
+    add(text) {
+      if (!text || !text.trim()) return;
+      const trimmed = text.trim();
+
+      // Deduplication: check overlap with last entry
+      if (this.entries.length > 0) {
+        const lastEntry = this.entries[this.entries.length - 1];
+        const similarity = this._similarity(lastEntry.text, trimmed);
+        if (similarity > DEDUP_SIMILARITY_THRESHOLD) {
+          // Merge: keep the longer version
+          if (trimmed.length > lastEntry.text.length) {
+            lastEntry.text = trimmed;
+            lastEntry.timestamp = new Date().toISOString();
+          }
+          return;
+        }
+      }
+
+      this.entries.push({
+        text: trimmed,
+        timestamp: new Date().toISOString(),
+        meetingContext: this.activeMeeting ? { ...this.activeMeeting } : null,
+      });
+
+      // Cap to maxEntries
+      if (this.entries.length > this.maxEntries) {
+        this.entries = this.entries.slice(-this.maxEntries);
+      }
+    }
+
+    /** Set meeting context for subsequent transcript entries. */
+    setMeeting(meeting) {
+      this.activeMeeting = meeting ? { id: meeting.id, name: meeting.name } : null;
+    }
+
+    /** Clear meeting context. */
+    clearMeeting() {
+      this.activeMeeting = null;
+    }
+
+    /**
+     * Build a structured transcript string for LLM consumption.
+     * Returns timestamped lines with optional meeting markers.
+     */
+    buildContext() {
+      if (this.entries.length === 0) return '';
+
+      const lines = this.entries.map((entry) => {
+        const time = new Date(entry.timestamp);
+        const timeStr = time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const meetingTag = entry.meetingContext
+          ? ` [MEETING: ${entry.meetingContext.name}]`
+          : '';
+        return `[${timeStr}]${meetingTag} ${entry.text}`;
+      });
+
+      return lines.join('\n');
+    }
+
+    /** Check if there is any transcript content. */
+    hasContent() {
+      return this.entries.length > 0;
+    }
+
+    /** Whether any entries have meeting context. */
+    hasMeetingContext() {
+      return this.entries.some((e) => e.meetingContext !== null);
+    }
+
+    /** Clear all entries. */
+    clear() {
+      this.entries = [];
+    }
+
+    /** Compute simple word-overlap similarity between two strings (0-1). */
+    _similarity(a, b) {
+      const wordsA = new Set(a.toLowerCase().split(/\s+/));
+      const wordsB = new Set(b.toLowerCase().split(/\s+/));
+      if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+      let overlap = 0;
+      for (const w of wordsA) {
+        if (wordsB.has(w)) overlap++;
+      }
+      return overlap / Math.max(wordsA.size, wordsB.size);
+    }
+  }
+
   // ─── State ──────────────────────────────────────────────────────────────
+  const transcriptManager = new TranscriptManager();
+
   const state = {
     isListening: false,
     isProcessing: false,
@@ -17,7 +128,6 @@
     sttProvider: 'openai',
     sttApiKey: '',
     conversationHistory: [],
-    transcriptBuffer: '',
     micStream: null,
     micRecorder: null,
     audioChunks: [],
@@ -280,7 +390,7 @@
 
   function handleClearConversation() {
     state.conversationHistory = [];
-    state.transcriptBuffer = '';
+    transcriptManager.clear();
     if (dom.responseStream) dom.responseStream.innerHTML = '';
     collapsePanel();
     showToast('Conversation cleared');
@@ -456,7 +566,15 @@
     // Meeting detection
     if (window.halo.onMeetingDetected) {
       window.halo.onMeetingDetected((meeting) => {
+        transcriptManager.setMeeting(meeting);
         showToast(`Meeting detected: ${meeting.name} — Halo active`);
+      });
+    }
+
+    if (window.halo.onMeetingEnded) {
+      window.halo.onMeetingEnded((meeting) => {
+        transcriptManager.clearMeeting();
+        showToast(`Meeting ended: ${meeting.name}`);
       });
     }
   }
@@ -654,7 +772,7 @@
       const transcript = await window.halo.transcribeAudio(arrayBuffer, 'webm');
       if (transcript && transcript.trim()) {
         const text = transcript.trim();
-        state.transcriptBuffer += ' ' + text;
+        transcriptManager.add(text);
         showToast(`🎤 "${text}"`);
       }
     } catch (err) {
@@ -681,21 +799,26 @@
       console.warn('Screen capture failed, proceeding without screenshot:', err);
     }
 
-    const transcript = state.transcriptBuffer.trim();
+    const transcript = transcriptManager.buildContext();
     const inputText = dom.inputField.value.trim();
     dom.inputField.value = '';
 
+    // Auto-select meetingAssist if in a meeting and action is 'assist' or 'say'
+    let effectiveAction = action;
+    if (transcriptManager.hasMeetingContext() && (action === 'assist' || action === 'say')) {
+      effectiveAction = 'meetingAssist';
+    }
+
     const context = {
-      action,
+      action: effectiveAction,
       screenshot,
       transcript: transcript || null,
       userInput: inputText || null,
     };
 
-    await runAI(action, null, context);
+    await runAI(effectiveAction, null, context);
   }
 
-  // ─── AI Execution ──────────────────────────────────────────────────────
   async function runAI(action, userText, context) {
     if (!state.apiKey) {
       appendResponse('system', 'Please set your API key in Settings first.');
@@ -708,8 +831,14 @@
     lastResizedH = 0;
     autoExpand();
 
-    // Build messages
-    const systemPrompt = getSystemPrompt(action);
+    // Build messages — fetch prompt from the single source of truth via preload bridge
+    let systemPrompt;
+    try {
+      systemPrompt = await window.halo.getPrompt(action);
+    } catch {
+      // Fallback to question prompt if IPC fails
+      systemPrompt = await window.halo.getPrompt('question');
+    }
     const messages = [{ role: 'system', content: systemPrompt }];
 
     // Add conversation history (last 10 messages for context)
@@ -728,6 +857,7 @@
       recap: '📋 Recap',
       solveCode: '< > Solve Code',
       question: '? Question',
+      meetingAssist: '🎯 Meeting Assist',
     };
     const label = actionLabels[action] || action;
 
@@ -744,9 +874,9 @@
         { role: 'assistant', content: fullResponse }
       );
 
-      // Clear transcript buffer after use
-      if (context?.transcript) {
-        state.transcriptBuffer = '';
+      // Cap conversation history to prevent unbounded memory growth
+      if (state.conversationHistory.length > MAX_CONVERSATION_HISTORY) {
+        state.conversationHistory = state.conversationHistory.slice(-MAX_CONVERSATION_HISTORY);
       }
     } catch (err) {
       bodyEl.textContent = `Error: ${err.message}`;
@@ -764,7 +894,7 @@
     const parts = [];
 
     if (context?.transcript) {
-      parts.push(`[TRANSCRIPT]\n${context.transcript}`);
+      parts.push(`[LIVE TRANSCRIPT]\n${context.transcript}\n[/LIVE TRANSCRIPT]`);
     }
 
     if (context?.userInput) {
@@ -829,12 +959,25 @@
     html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
 
+    // Checkboxes (must come before unordered lists)
+    html = html.replace(/^- \[x\] (.+)$/gm, '<li class="checkbox checked"><input type="checkbox" checked disabled /> $1</li>');
+    html = html.replace(/^- \[ \] (.+)$/gm, '<li class="checkbox"><input type="checkbox" disabled /> $1</li>');
+
     // Unordered lists
     html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+    html = html.replace(/((?:<li(?:\s[^>]*)?>.*<\/li>\n?)+)/g, (match) => {
+      // Determine if this block contains checkboxes → use <ul class="checklist">
+      if (match.includes('class="checkbox')) {
+        return `<ul class="checklist">${match}</ul>`;
+      }
+      return `<ul>${match}</ul>`;
+    });
 
     // Ordered lists
-    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/^\d+\. (.+)$/gm, '<li class="ol-item">$1</li>');
+    html = html.replace(/((?:<li class="ol-item">.*<\/li>\n?)+)/g, '<ol>$1</ol>');
+    // Clean up the marker class
+    html = html.replace(/ class="ol-item"/g, '');
 
     // Paragraphs (double newline)
     html = html.replace(/\n\n/g, '</p><p>');
@@ -846,8 +989,10 @@
     html = html.replace(/(<\/h[234]>)<\/p>/g, '$1');
     html = html.replace(/<p>(<pre>)/g, '$1');
     html = html.replace(/(<\/pre>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<ul>)/g, '$1');
+    html = html.replace(/<p>(<ul[^>]*>)/g, '$1');
     html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+    html = html.replace(/<p>(<ol>)/g, '$1');
+    html = html.replace(/(<\/ol>)<\/p>/g, '$1');
 
     el.innerHTML = html;
   }
@@ -899,68 +1044,8 @@
     }
   }
 
-  // ─── System Prompts ─────────────────────────────────────────────────────
-  function getSystemPrompt(action) {
-    const prompts = {
-      assist: `You are Halo, an invisible AI copilot overlay on the user's screen. You can see their screen via a screenshot. You may also receive a transcript of recent audio from a meeting or conversation.
-
-Your job: Analyze the screen and any transcript, then provide concise, actionable help. Be direct. Use bullet points and short paragraphs. Format responses with markdown.
-
-Rules:
-- Be concise — the user is reading this in a small overlay panel
-- If you see code, help with it directly
-- If there's a conversation transcript, provide context-aware suggestions
-- Never say "I can see your screen" — just act on the information
-- Prioritize actionable insights over explanations`,
-
-      say: `You are Halo, helping the user navigate a conversation. Based on the screen content and conversation transcript, suggest what the user should say next.
-
-Rules:
-- Provide 2-3 concrete response options
-- Match the tone of the conversation
-- Keep suggestions natural and conversational
-- Format as numbered options with brief context for each
-- Be concise — this is a small overlay panel`,
-
-      followup: `You are Halo. Based on the conversation context, generate smart follow-up questions the user could ask.
-
-Rules:
-- Provide 3-5 follow-up questions
-- Make them specific to the conversation topic
-- Prioritize questions that drive deeper understanding
-- Format as a numbered list
-- Be concise`,
-
-      recap: `You are Halo. Provide a concise recap of the conversation or content visible on screen.
-
-Rules:
-- Summarize key points in bullet form
-- Highlight decisions, action items, or important details
-- Keep it scannable — use headers and bullets
-- Maximum 5-8 bullet points
-- Note any unresolved questions or pending items`,
-
-      solveCode: `You are Halo, a code analysis assistant. Analyze the code visible on screen and provide solutions.
-
-Rules:
-- Identify bugs, issues, or optimization opportunities
-- Provide corrected code snippets
-- Explain changes briefly
-- Use proper code formatting with language tags
-- If the code looks fine, suggest improvements or best practices
-- Be concise — show code, not paragraphs of explanation`,
-
-      question: `You are Halo, a helpful AI assistant running as an invisible overlay. Answer the user's question concisely and accurately.
-
-Rules:
-- Be direct and concise
-- Use markdown formatting
-- If the question relates to something on screen, reference it
-- Keep responses appropriate for a small overlay panel`,
-    };
-
-    return prompts[action] || prompts.question;
-  }
+  // Note: System prompts now come from prompts.js via the preload bridge (window.halo.getPrompt).
+  // The inline getSystemPrompt() has been removed to eliminate prompt duplication.
 
   // ─── Utility ────────────────────────────────────────────────────────────
   function arrayBufferToBase64(buffer) {

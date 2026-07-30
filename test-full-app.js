@@ -255,12 +255,135 @@ async function runAllTests() {
       'halo:get-active-meeting',
       'halo:stream-ai',
       'halo:transcribe-audio',
+      'halo:get-prompt',
     ];
 
     for (const channel of requiredIPCEvents) {
       assert(preloadContent.includes(`'${channel}'`), `IPC channel ${channel} missing in preload.js`);
       assert(mainContent.includes(`'${channel}'`), `IPC handler for ${channel} missing in main.js`);
     }
+  });
+
+  // 9. Prompt Single Source of Truth Audit
+  console.log('\n[9] Prompt Single Source of Truth Audit');
+  test('renderer/app.js does NOT contain duplicate system prompts', () => {
+    const appPath = path.join(__dirname, 'renderer', 'app.js');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+
+    // The old inline getSystemPrompt function should be gone
+    assert(!appContent.includes('function getSystemPrompt('),
+      'renderer/app.js still contains inline getSystemPrompt function — should use preload bridge');
+
+    // The comment explaining the removal should exist
+    assert(appContent.includes('prompts.js via the preload bridge'),
+      'renderer/app.js should reference the preload bridge for prompts');
+  });
+
+  test('prompts.js is the single source of truth with all actions', () => {
+    const { getActions, getPrompt } = require('./src/prompts');
+    const actions = getActions();
+
+    // Must include all core actions plus meetingAssist
+    const required = ['assist', 'say', 'followup', 'recap', 'solveCode', 'question', 'meetingAssist'];
+    for (const act of required) {
+      assert(actions.includes(act), `Action '${act}' missing from prompts.js`);
+      const prompt = getPrompt(act);
+      assert(typeof prompt === 'string' && prompt.length > 50,
+        `Prompt for '${act}' is missing or too short`);
+    }
+  });
+
+  // 10. Knowledge Base Edge Cases
+  console.log('\n[10] Knowledge Base Edge Cases');
+  await testAsync('KnowledgeBase handles empty files', async () => {
+    const { KnowledgeBase } = require('./src/knowledge');
+    const kb = new KnowledgeBase();
+
+    const tmpPath = path.join(__dirname, 'tmp_test_empty.txt');
+    fs.writeFileSync(tmpPath, '', 'utf-8');
+
+    try {
+      const doc = await kb.addDocument(tmpPath);
+      assert(doc.filename === 'tmp_test_empty.txt', 'Should add empty file');
+      assert(doc.textLength === 0, 'Empty file should have 0 text length');
+
+      // Context should still work
+      const context = kb.getContext();
+      assert(typeof context === 'string', 'Context should be a string even with empty doc');
+
+      kb.removeDocument(doc.id);
+    } finally {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    }
+  });
+
+  await testAsync('KnowledgeBase removeDocument returns false for unknown ID', async () => {
+    const { KnowledgeBase } = require('./src/knowledge');
+    const kb = new KnowledgeBase();
+
+    const result = kb.removeDocument('nonexistent_id_12345');
+    assert(result === false, 'removeDocument should return false for unknown ID');
+  });
+
+  // 11. Meeting Detection Event Integration
+  console.log('\n[11] Meeting Detection Events');
+  test('MeetingDetector emits correctly through state machine', () => {
+    const { MeetingDetector } = require('./src/meetings');
+    const detector = new MeetingDetector();
+
+    assert(detector.isInMeeting() === false, 'Should not be in meeting initially');
+    assert(detector.getActiveMeeting() === null, 'No active meeting initially');
+
+    // Verify event emitter interface
+    assert(typeof detector.on === 'function', 'Should have EventEmitter on method');
+    assert(typeof detector.emit === 'function', 'Should have EventEmitter emit method');
+
+    detector.stop();
+  });
+
+  // 12. Renderer Markdown Patterns
+  console.log('\n[12] Renderer Markdown Patterns');
+  test('renderer/app.js handles ordered lists with <ol> wrapping', () => {
+    const appPath = path.join(__dirname, 'renderer', 'app.js');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+
+    assert(appContent.includes('<ol>'), 'Markdown renderer should include <ol> tags');
+    assert(appContent.includes('ol-item'), 'Should use ol-item marker for ordered list differentiation');
+  });
+
+  test('renderer/app.js handles checkbox rendering', () => {
+    const appPath = path.join(__dirname, 'renderer', 'app.js');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+
+    assert(appContent.includes('checkbox'), 'Markdown renderer should handle checkboxes');
+    assert(appContent.includes('\\[x\\]') || appContent.includes('[x]'),
+      'Should handle checked checkboxes');
+    assert(appContent.includes('\\[ \\]') || appContent.includes('[ ]'),
+      'Should handle unchecked checkboxes');
+  });
+
+  test('renderer/app.js caps conversation history', () => {
+    const appPath = path.join(__dirname, 'renderer', 'app.js');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+
+    assert(appContent.includes('MAX_CONVERSATION_HISTORY'),
+      'Should define MAX_CONVERSATION_HISTORY constant');
+    assert(appContent.includes('slice(-MAX_CONVERSATION_HISTORY)'),
+      'Should slice conversation history to cap');
+  });
+
+  test('renderer/app.js contains TranscriptManager class', () => {
+    const appPath = path.join(__dirname, 'renderer', 'app.js');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+
+    assert(appContent.includes('class TranscriptManager'),
+      'Should contain TranscriptManager class');
+    assert(appContent.includes('_similarity'),
+      'TranscriptManager should have deduplication logic');
+    assert(appContent.includes('meetingContext'),
+      'TranscriptManager should track meeting context');
+    assert(appContent.includes('buildContext'),
+      'TranscriptManager should have buildContext method');
   });
 
   // Summary

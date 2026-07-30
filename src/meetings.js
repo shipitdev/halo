@@ -18,6 +18,7 @@ const MEETING_APPS = [
 ];
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds
+const END_DEBOUNCE_COUNT = 2; // Require N consecutive empty polls before ending
 
 class MeetingDetector extends EventEmitter {
   constructor() {
@@ -25,6 +26,7 @@ class MeetingDetector extends EventEmitter {
     this._activeMeeting = null; // { id, name, startedAt }
     this._pollTimer = null;
     this._isPolling = false;
+    this._emptyPollCount = 0; // Debounce counter for meeting-ended
   }
 
   /**
@@ -75,17 +77,25 @@ class MeetingDetector extends EventEmitter {
 
       if (detectedApp && !this._activeMeeting) {
         // Meeting just started
+        this._emptyPollCount = 0;
         this._activeMeeting = {
           id: detectedApp.id,
           name: detectedApp.name,
           startedAt: new Date().toISOString(),
         };
         this.emit('meeting-started', this._activeMeeting);
+      } else if (detectedApp && this._activeMeeting) {
+        // Meeting still active — reset debounce
+        this._emptyPollCount = 0;
       } else if (!detectedApp && this._activeMeeting) {
-        // Meeting just ended
-        const ended = { ...this._activeMeeting };
-        this._activeMeeting = null;
-        this.emit('meeting-ended', ended);
+        // Meeting may have ended — debounce
+        this._emptyPollCount++;
+        if (this._emptyPollCount >= END_DEBOUNCE_COUNT) {
+          const ended = { ...this._activeMeeting };
+          this._activeMeeting = null;
+          this._emptyPollCount = 0;
+          this.emit('meeting-ended', ended);
+        }
       }
     } catch (err) {
       // Silently ignore poll errors (process might have exited)
@@ -109,9 +119,12 @@ class MeetingDetector extends EventEmitter {
     const lines = processOutput.toLowerCase();
 
     for (const app of MEETING_APPS) {
-      // Check process names
+      // Check process names using word-boundary matching
       for (const procName of app.processNames) {
-        if (lines.includes(procName.toLowerCase())) {
+        const escaped = procName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Match as a standalone token: preceded by start/slash/space, followed by end/space/newline
+        const pattern = new RegExp(`(?:^|[/\\\\\\s])${escaped}(?:[\\s\n]|$)`, 'm');
+        if (pattern.test(lines)) {
           return app;
         }
       }
@@ -142,4 +155,4 @@ class MeetingDetector extends EventEmitter {
   }
 }
 
-module.exports = { MeetingDetector, MEETING_APPS };
+module.exports = { MeetingDetector, MEETING_APPS, END_DEBOUNCE_COUNT };

@@ -147,4 +147,8 @@ contextBridge.exposeInMainWorld('halo', {
 
   /** Get currently active meeting info. */
   getActiveMeeting: () => ipcRenderer.invoke('halo:get-active-meeting'),
+
+  // ─── System Prompts ────────────────────────────────────────────────
+  /** Get the system prompt for a given action (from prompts.js, the single source of truth). */
+  getPrompt: (action) => ipcRenderer.invoke('halo:get-prompt', action),
 });

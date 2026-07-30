@@ -238,6 +238,232 @@ test('getTranscriptionProvider returns null when no providers configured', () =>
   assert(provider === null, 'Should return null');
 });
 
+// ─── Test Meeting Detection (Enhanced) ──────────────────────────────────────
+console.log('\n⦿ Meeting Detection (Enhanced)');
+
+test('_matchMeetingApp uses word-boundary matching (no false positives)', () => {
+  const { MeetingDetector } = require('./src/meetings');
+  const detector = new MeetingDetector();
+
+  // Should NOT match 'Slack' from a path containing 'slack' as a substring
+  const noMatch = detector._matchMeetingApp('/usr/local/slackbot-handler\n/bin/bash');
+  // 'slackbot-handler' should not match 'slack' since 'slack' must be a standalone token
+  // The word boundary pattern requires a separator before and after the process name
+  assert(noMatch === null || noMatch.id !== 'slack',
+    'Should not false-positive match "slackbot-handler" as Slack');
+});
+
+test('_matchMeetingApp correctly matches full process names', () => {
+  const { MeetingDetector } = require('./src/meetings');
+  const detector = new MeetingDetector();
+
+  // zoom.us as a standalone process (typical macOS ps output)
+  const zoomMatch = detector._matchMeetingApp('/Applications/zoom.us\n/bin/bash');
+  assert(zoomMatch && zoomMatch.id === 'zoom', 'Should match zoom.us');
+
+  // MSTeams as standalone
+  const teamsMatch = detector._matchMeetingApp('/Applications/MSTeams\n');
+  assert(teamsMatch && teamsMatch.id === 'teams', 'Should match MSTeams');
+});
+
+test('Meeting debounce prevents premature end events', () => {
+  const { MeetingDetector, END_DEBOUNCE_COUNT } = require('./src/meetings');
+  const detector = new MeetingDetector();
+  const events = [];
+
+  detector.on('meeting-started', (m) => events.push({ type: 'started', meeting: m }));
+  detector.on('meeting-ended', (m) => events.push({ type: 'ended', meeting: m }));
+
+  // Simulate: override _getRunningProcesses for controlled testing
+  let mockProcessOutput = 'zoom.us\n';
+  detector._getRunningProcesses = () => Promise.resolve(mockProcessOutput);
+
+  // Run polls manually
+  const runPoll = async () => {
+    await detector._poll();
+  };
+
+  // Start polling synchronously for testing
+  (async () => {
+    // Poll 1: detect meeting
+    await runPoll();
+    assert(events.length === 1, `Expected 1 event after first poll, got ${events.length}`);
+    assert(events[0].type === 'started', 'First event should be started');
+
+    // Poll 2: meeting disappears (first empty poll)
+    mockProcessOutput = '/bin/bash\n';
+    await runPoll();
+    assert(events.length === 1, `Expected 1 event (debouncing), got ${events.length}`);
+    assert(detector.isInMeeting(), 'Should still be in meeting during debounce');
+
+    // Poll 3: second consecutive empty poll → should end
+    await runPoll();
+    assert(events.length === 2, `Expected 2 events after debounce, got ${events.length}`);
+    assert(events[1].type === 'ended', 'Second event should be ended');
+  })();
+
+  detector.stop();
+});
+
+test('Meeting debounce resets when app reappears', () => {
+  const { MeetingDetector } = require('./src/meetings');
+  const detector = new MeetingDetector();
+  const events = [];
+
+  detector.on('meeting-started', (m) => events.push('started'));
+  detector.on('meeting-ended', (m) => events.push('ended'));
+
+  let mockOutput = 'zoom.us\n';
+  detector._getRunningProcesses = () => Promise.resolve(mockOutput);
+
+  (async () => {
+    // Start meeting
+    await detector._poll();
+    assert(events.length === 1 && events[0] === 'started');
+
+    // Flicker: disappears for one poll
+    mockOutput = '';
+    await detector._poll();
+    assert(events.length === 1, 'Should not have ended yet');
+
+    // Reappears before debounce completes
+    mockOutput = 'zoom.us\n';
+    await detector._poll();
+    assert(events.length === 1, 'Should still only have started event');
+    assert(detector._emptyPollCount === 0, 'Debounce counter should be reset');
+  })();
+
+  detector.stop();
+});
+
+test('matchWindowTitles handles empty and null inputs', () => {
+  const { MeetingDetector } = require('./src/meetings');
+  const detector = new MeetingDetector();
+
+  assert(detector.matchWindowTitles(null) === null, 'null should return null');
+  assert(detector.matchWindowTitles([]) === null, 'empty array should return null');
+  assert(detector.matchWindowTitles([{ name: '' }]) === null, 'empty title should return null');
+  assert(detector.matchWindowTitles([{ name: 'Regular App' }]) === null, 'non-meeting title should return null');
+});
+
+test('matchWindowTitles detects Slack huddle', () => {
+  const { MeetingDetector } = require('./src/meetings');
+  const detector = new MeetingDetector();
+
+  const result = detector.matchWindowTitles([{ name: 'Slack - Huddle with team' }]);
+  assert(result && result.id === 'slack', `Expected Slack huddle detection, got ${result?.id}`);
+});
+
+// ─── Test Audio Edge Cases ──────────────────────────────────────────────────
+console.log('\n⦿ Audio Edge Cases');
+
+test('AudioChunkBuffer flush with no chunks does nothing', () => {
+  const { AudioChunkBuffer } = require('./src/audio');
+  let flushCalled = false;
+
+  const buffer = new AudioChunkBuffer({
+    sampleRate: 16000,
+    onFlush: () => { flushCalled = true; },
+  });
+
+  buffer.flush();
+  assert(flushCalled === false, 'onFlush should not be called when there are no chunks');
+});
+
+test('AudioChunkBuffer dispose stops timer and flushes remaining', () => {
+  const { AudioChunkBuffer } = require('./src/audio');
+  let flushedBuffer = null;
+
+  const buffer = new AudioChunkBuffer({
+    flushIntervalMs: 60000, // long interval so it doesn't auto-flush
+    sampleRate: 16000,
+    onFlush: (wav) => { flushedBuffer = wav; },
+  });
+
+  buffer.start();
+  assert(buffer.intervalId !== null, 'Timer should be running');
+
+  buffer.push(new Float32Array([0.1, 0.2]));
+  buffer.dispose();
+
+  assert(buffer.intervalId === null, 'Timer should be stopped after dispose');
+  assert(flushedBuffer !== null, 'Should have flushed remaining audio on dispose');
+  assert(flushedBuffer.toString('ascii', 0, 4) === 'RIFF', 'Disposed flush should produce valid WAV');
+});
+
+test('AudioChunkBuffer multiple pushes concatenate correctly', () => {
+  const { AudioChunkBuffer } = require('./src/audio');
+  let flushedSize = 0;
+
+  const buffer = new AudioChunkBuffer({
+    sampleRate: 16000,
+    onFlush: (wav) => {
+      // WAV data size = total length - 44 header, each sample = 2 bytes
+      flushedSize = (wav.length - 44) / 2;
+    },
+  });
+
+  buffer.push(new Float32Array([0.1, 0.2, 0.3]));
+  buffer.push(new Float32Array([0.4, 0.5]));
+  buffer.flush();
+
+  assert(flushedSize === 5, `Expected 5 samples in flushed WAV, got ${flushedSize}`);
+});
+
+// ─── Test Config Deep Merge ─────────────────────────────────────────────────
+console.log('\n⦿ Config Deep Merge');
+
+test('ConfigManager preserves nested hotkeys on partial update', () => {
+  const { ConfigManager } = require('./src/config');
+  const cfg = new ConfigManager();
+
+  // Set a nested value
+  cfg.set('hotkeys.toggleOverlay', 'Cmd+B');
+  cfg.set('hotkeys.custom', 'Cmd+K');
+
+  assert(cfg.get('hotkeys.toggleOverlay') === 'Cmd+B', 'toggleOverlay should be preserved');
+  assert(cfg.get('hotkeys.custom') === 'Cmd+K', 'custom hotkey should be set');
+  // Original defaults should still be accessible if not overwritten
+  assert(cfg.get('hotkeys.assist') !== undefined, 'assist hotkey from defaults should exist');
+});
+
+test('ConfigManager getAll returns a copy', () => {
+  const { ConfigManager } = require('./src/config');
+  const cfg = new ConfigManager();
+
+  const all1 = cfg.getAll();
+  all1.provider = 'mutated';
+  const all2 = cfg.getAll();
+  assert(all2.provider !== 'mutated', 'getAll should return a copy, not a reference');
+});
+
+// ─── Test Prompts Module (Enhanced) ─────────────────────────────────────────
+console.log('\n⦿ Prompts Module (Enhanced)');
+
+test('meetingAssist prompt exists and is substantial', () => {
+  const { getPrompt, getActions } = require('./src/prompts');
+  const actions = getActions();
+  assert(actions.includes('meetingAssist'), 'meetingAssist action should be available');
+
+  const prompt = getPrompt('meetingAssist');
+  assert(typeof prompt === 'string' && prompt.length > 100,
+    'meetingAssist prompt should be substantial');
+  assert(prompt.includes('MEETING'), 'meetingAssist prompt should reference meeting context');
+});
+
+test('prompts reference structured transcript format', () => {
+  const { getPrompt } = require('./src/prompts');
+
+  // Key prompts that consume transcripts should mention the timestamp format
+  const assistPrompt = getPrompt('assist');
+  assert(assistPrompt.includes('[') && assistPrompt.includes('timestamp'),
+    'assist prompt should reference timestamp format');
+
+  const sayPrompt = getPrompt('say');
+  assert(sayPrompt.includes('timestamp') || sayPrompt.includes('MEETING'),
+    'say prompt should reference transcript format');
+});
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`  ${passed} passed, ${failed} failed, ${passed + failed} total`);
