@@ -1,63 +1,65 @@
-# Halo
-![Status: Work in Progress](https://img.shields.io/badge/Status-Work_in_Progress-orange)
-![Version: Pre-release](https://img.shields.io/badge/Version-v1.0_Beta-blue)
+# Halo (v1.0.0 Beta)
+![Status: Beta](https://img.shields.io/badge/Status-Beta_v1.0.0-emerald)
+![Platform: macOS](https://img.shields.io/badge/Platform-macOS-blue)
+![License: GPL--3.0](https://img.shields.io/badge/License-GPL--3.0-purple)
 
-An invisible AI overlay for macOS — captures your screen, mic, and meeting audio to power a real-time AI copilot that stays hidden from screen shares.
+A translucent, liquid-glass AI copilot overlay for macOS — captures your screen, mic, and desktop content in real time to power a live AI assistant.
 
-## What It Does
+> [!NOTE]
+> **Halo is currently in Beta (v1.0.0)**. Features and APIs are actively evolving.
 
-Halo floats on top of everything but is **invisible to screen recordings and screen shares**. It listens to your microphone and system audio, transcribes conversations in real time, and gives you AI-powered assistance — all without anyone knowing.
+---
 
-### Features
+## ⚡ Key Features
 
-- **Screen-Share Invisible** — Uses macOS content protection so the overlay never appears in recordings or shared screens
-- **Real-Time Transcription** — Captures mic + system audio and transcribes with Whisper / Gemini
-- **Multi-Provider AI** — Choose between OpenAI (GPT-4o), Anthropic (Claude), or Google (Gemini)
-- **Smart Actions** — Assist, "What Should I Say?", Follow-Up, Recap, Solve Code
-- **Glassmorphism UI** — Sleek frosted-glass dark theme with purple/blue accents
-- **Global Hotkeys** — Fully customizable keyboard shortcuts
-- **System Tray** — Minimal footprint, runs from the menu bar
+- **Liquid Glassmorphism UI** — High-contrast frosted glass overlay with emerald accents that floats over your browser, IDE, or meeting apps without obscuring underlying content.
+- **Dynamic Auto-Scaling & Resizing** — Panel automatically expands to show complete AI responses and includes a manual bottom drag handle for custom window heights up to 800px.
+- **Voice Activity Detection (VAD)** — Intelligent Web Audio API energy monitoring detects spoken sentences and transcribes audio only when speech finishes, saving API quota.
+- **Screen Analysis & Coding Assistant** — Instantly captures LeetCode problems or on-screen code (`Cmd+Shift+H`) and delivers formatted analysis with 1-click code copying.
+- **LaTeX Math Rendering** — Beautifully formats complexity notations (e.g. $\mathcal{O}(N)$) and mathematical expressions inline and in dedicated math blocks.
+- **Multi-Model Provider Architecture** — Seamlessly stream responses from OpenAI (GPT-4o, GPT-4o-mini, Whisper) or Google Gemini (2.0 Flash, 2.0 Flash Lite, 1.5 Pro).
+- **Global Hotkeys & Click-Through Mode** — Toggle overlay visibility (`Cmd+B`), trigger AI assistance (`Cmd+Enter`), or enable mouse click-through mode for uninterrupted work.
 
-## Requirements
+---
 
-- macOS 12+
-- Node.js 18+
-- An API key for at least one provider (OpenAI, Anthropic, or Google)
-
-## Setup
+## 🚀 Quick Start
 
 ```bash
+# Clone repository
+git clone https://github.com/shipitdev/halo.git
+cd halo
+
 # Install dependencies
 npm install
 
-# Launch the app
+# Start Halo
 npm start
 ```
 
-On first launch, open **Settings** (via the tray icon or gear button) and enter your API key.
+On first launch, open **Settings** (⚙ top right of toolbar) to enter your **Gemini** (`AIzaSy...`) or **OpenAI** (`sk-...`) API Key.
 
-## Hotkeys (Defaults)
+---
+
+## ⌨️ Default Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
 | `Cmd + B` | Toggle overlay visibility |
-| `Cmd + Enter` | Assist (analyze screen + audio) |
-| `Cmd + H` | Solve Code |
+| `Cmd + Enter` | Trigger AI Assist (Screen + Transcript Context) |
+| `Cmd + Shift + H` | Solve Code / Analyze Screen |
 | `Cmd + Shift + X` | Quit Halo |
 
-Hotkeys are fully customizable from the Settings panel.
+---
 
-## Tech Stack
+## 🛠 Tech Stack
 
-- **Desktop:** Electron + vanilla HTML/CSS/JS
-- **AI:** OpenAI, Anthropic, Google Gemini SDKs
-- **Audio:** Web Audio API + Electron desktopCapturer
-- **Server:** Express.js + PostgreSQL (optional, for auth/billing)
+- **Framework**: Electron (Frameless transparent overlay)
+- **Frontend**: Vanilla HTML5, CSS3 Glassmorphism System, ES2022 JavaScript
+- **AI Integration**: OpenAI Node SDK, `@google/genai` Google GenAI SDK
+- **Audio Processing**: Web Audio API (RMS Analyser) + MediaRecorder WebM / PCM Audio Buffer
 
-## Privacy
+---
 
-Halo processes audio and screenshots **only when you trigger an action**. No data is stored on external servers unless you opt into the hosted backend. All AI calls go directly to the provider you choose.
+## 📄 License
 
-## License
-
-GPL-3.0 — Copyright (C) 2026 shipitdev
+GPL-3.0 — Copyright (c) 2026 shipitdev

@@ -32,10 +32,13 @@ npm-debug.log*
 # Coverage
 coverage/
 
-# Misc
+# Miscellaneous & Local Config
 *.tgz
 .cache/
+halo-config.json
+.halo/
+test-gemini-models.js
+test-transcribe-models.js
 
 # Implementation plan
 implementation_plan.md
-.gitignore

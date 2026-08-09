@@ -12,8 +12,8 @@ class GeminiProvider extends BaseProvider {
 
   get models() {
     return {
-      smart: 'gemini-3.6-flash',
-      fast: 'gemini-3.5-flash',
+      smart: 'gemini-2.0-flash',
+      fast: 'gemini-2.0-flash-lite',
     };
   }
 
@@ -88,15 +88,35 @@ class GeminiProvider extends BaseProvider {
     };
 
     let response;
-    try {
-      response = await callApi(model);
-    } catch (err) {
-      if (err.message && (err.message.includes('404') || err.message.includes('429'))) {
-        console.warn(`Gemini model ${model} returned error. Retrying with fallback model gemini-3.6-flash...`);
-        response = await callApi('gemini-3.6-flash');
-      } else {
-        throw err;
+    // Valid Google Gemini API model names in order of fallback
+    const fallbackModels = [model, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-lite'];
+    const uniqueFallbacks = [...new Set(fallbackModels)];
+
+    let lastError = null;
+    for (const targetModel of uniqueFallbacks) {
+      try {
+        response = await callApi(targetModel);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        const errStr = (err.message || '').toLowerCase();
+        if (errStr.includes('429') || errStr.includes('resource_exhausted') || errStr.includes('quota')) {
+          console.warn(`Gemini rate limited (429) on model ${targetModel}. Trying next fallback model...`);
+          await new Promise((res) => setTimeout(res, 1500));
+        } else if (errStr.includes('404') || errStr.includes('not found')) {
+          console.warn(`Gemini model ${targetModel} not found (404). Trying next fallback model...`);
+        } else {
+          throw err;
+        }
       }
+    }
+
+    if (lastError && !response) {
+      if ((lastError.message || '').includes('429') || (lastError.message || '').includes('RESOURCE_EXHAUSTED')) {
+        throw new Error('Gemini API Rate Limit (429) reached. Please wait a few seconds before trying again.');
+      }
+      throw lastError;
     }
 
     for await (const chunk of response) {
@@ -117,26 +137,37 @@ class GeminiProvider extends BaseProvider {
     const base64Audio = audioBuffer.toString('base64');
     const mimeType = format === 'wav' ? 'audio/wav' : `audio/${format}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: [
-        {
-          parts: [
+    const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+    let lastErr;
+    for (const m of models) {
+      try {
+        const response = await ai.models.generateContent({
+          model: m,
+          contents: [
             {
-              inlineData: {
-                mimeType,
-                data: base64Audio,
-              },
-            },
-            {
-              text: 'Transcribe this audio accurately. Return only the transcription text, no commentary or formatting.',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType,
+                    data: base64Audio,
+                  },
+                },
+                {
+                  text: 'Transcribe this audio accurately. Return only the transcription text, no commentary or formatting.',
+                },
+              ],
             },
           ],
-        },
-      ],
-    });
-
-    return response.text || '';
+        });
+        return response.text || '';
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (lastErr?.message?.includes('429') || lastErr?.message?.includes('RESOURCE_EXHAUSTED')) {
+      throw new Error('Gemini API rate limit reached (429). Please wait a moment or configure an OpenAI API key.');
+    }
+    throw lastErr || new Error('Gemini audio transcription failed.');
   }
 
   supportsTranscription() {

@@ -34,7 +34,8 @@ let isVisible = true;
 // ─── Constants ──────────────────────────────────────────────────────────────
 const TOOLBAR_HEIGHT = 48;
 const TOOLBAR_WIDTH = 700;
-const MAX_EXPANDED_HEIGHT = 520;
+const MAX_EXPANDED_HEIGHT = 750;
+let userWindowHeight = 0;
 
 // ─── Window Creation ────────────────────────────────────────────────────────
 function createOverlayWindow() {
@@ -46,19 +47,20 @@ function createOverlayWindow() {
     height: TOOLBAR_HEIGHT,
     minWidth: 400,
     minHeight: TOOLBAR_HEIGHT,
-    maxHeight: 800,
+    maxHeight: MAX_EXPANDED_HEIGHT,
     x: Math.round((screenWidth - TOOLBAR_WIDTH) / 2),
     y: 8,
     frame: false,
     transparent: true,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: true,
+    maximizable: false,
+    fullscreenable: false,
     movable: true,
     hasShadow: false,
     roundedCorners: true,
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -67,14 +69,24 @@ function createOverlayWindow() {
     },
   });
 
-  // Invisible to screen recordings & screen shares
-  mainWindow.setContentProtection(true);
-
   // Float above everything, including fullscreen apps
   mainWindow.setAlwaysOnTop(true, 'floating', 1);
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  mainWindow.on('resize', () => {
+    if (mainWindow) {
+      const [, h] = mainWindow.getSize();
+      if (h > TOOLBAR_HEIGHT) {
+        userWindowHeight = h;
+      }
+    }
+  });
+
+  mainWindow.on('maximize', (e) => {
+    e.preventDefault();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -200,19 +212,19 @@ function registerHotkeys() {
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 function setupIPC() {
-  // Screenshot capture — compressed JPEG (max 1024px) to prevent 429 Rate Limit Errors
+  // Screenshot capture — high resolution JPEG (max 1600px width) for clear text on scrollable pages
   ipcMain.handle('halo:capture-screen', async () => {
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
-        thumbnailSize: { width: 1280, height: 720 },
+        thumbnailSize: { width: 1920, height: 1080 },
       });
 
       if (sources.length === 0) return null;
 
       const thumb = sources[0].thumbnail;
-      const resized = thumb.resize({ width: 1024 });
-      const jpegBuf = resized.toJPEG(75);
+      const resized = thumb.resize({ width: 1600 });
+      const jpegBuf = resized.toJPEG(85);
       return `data:image/jpeg;base64,${jpegBuf.toString('base64')}`;
     } catch (err) {
       console.error('Screenshot capture failed:', err);
@@ -250,7 +262,13 @@ function setupIPC() {
   // Dynamic resize — expand/collapse the toolbar
   ipcMain.on('halo:resize', (_event, height) => {
     if (!mainWindow) return;
-    const clampedHeight = Math.max(TOOLBAR_HEIGHT, Math.min(height, MAX_EXPANDED_HEIGHT));
+    const targetHeight = Math.max(height, userWindowHeight);
+    const clampedHeight = height === TOOLBAR_HEIGHT 
+      ? TOOLBAR_HEIGHT 
+      : Math.max(TOOLBAR_HEIGHT, Math.min(targetHeight, MAX_EXPANDED_HEIGHT));
+    if (height === TOOLBAR_HEIGHT) {
+      userWindowHeight = 0;
+    }
     const [w] = mainWindow.getSize();
     mainWindow.setSize(w, Math.round(clampedHeight), true);
   });
@@ -421,40 +439,38 @@ function setupIPC() {
 
   ipcMain.handle('halo:transcribe-audio', async (_event, audioBuffer, format = 'webm') => {
     try {
-      const sttProviderName = config.get('sttProvider', 'openai');
-      let sttApiKey = config.get('sttApiKey') || (sttProviderName === config.get('provider') ? config.get('apiKey') : '');
-
       const buf = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
-      let provider = null;
+      const primaryProviderName = config.get('sttProvider', 'gemini');
+      const openaiKey = config.get('openaiApiKey') || (config.get('provider') === 'openai' ? config.get('apiKey') : '');
+      const geminiKey = config.get('geminiApiKey') || (config.get('provider') === 'gemini' ? config.get('apiKey') : '');
 
-      if (sttApiKey) {
+      const providersToTry = [];
+      if (primaryProviderName === 'openai' && openaiKey) {
+        providersToTry.push({ name: 'openai', key: openaiKey });
+        if (geminiKey) providersToTry.push({ name: 'gemini', key: geminiKey });
+      } else {
+        if (geminiKey) providersToTry.push({ name: 'gemini', key: geminiKey });
+        if (openaiKey) providersToTry.push({ name: 'openai', key: openaiKey });
+      }
+
+      if (providersToTry.length === 0) {
+        return '';
+      }
+
+      for (const pConfig of providersToTry) {
         try {
-          const p = createProvider(sttProviderName, sttApiKey);
-          if (p.supportsTranscription()) provider = p;
-        } catch {
-          // ignore instantiation failure
+          const p = createProvider(pConfig.name, pConfig.key);
+          if (p.supportsTranscription()) {
+            return await p.transcribe(buf, format);
+          }
+        } catch (err) {
+          console.warn(`[STT Warning] ${pConfig.name}:`, err.message);
         }
       }
-
-      // Fallback: try getTranscriptionProvider with available keys
-      if (!provider) {
-        const primaryProvider = config.get('provider');
-        const primaryKey = config.get('apiKey');
-        const configs = {
-          openai: { apiKey: sttProviderName === 'openai' ? sttApiKey : (primaryProvider === 'openai' ? primaryKey : '') },
-          gemini: { apiKey: sttProviderName === 'gemini' ? sttApiKey : (primaryProvider === 'gemini' ? primaryKey : '') },
-        };
-        provider = getTranscriptionProvider(configs);
-      }
-
-      if (!provider) {
-        throw new Error(`Provider "${sttProviderName}" does not support speech transcription. Please configure OpenAI or Gemini API key in Settings.`);
-      }
-
-      return await provider.transcribe(buf, format);
+      return '';
     } catch (err) {
-      console.error('STT Transcription error:', err);
-      throw err;
+      console.warn('[STT Error]:', err.message);
+      return '';
     }
   });
 }

@@ -456,7 +456,58 @@
       if (dom.dropdownMenu && !dom.dropdownMenu.contains(e.target) && e.target !== dom.btnMore) {
         closeDropdown();
       }
+
+      // Code block copy button handler
+      const copyBtn = e.target.closest('.copy-code-btn');
+      if (copyBtn) {
+        const wrapper = copyBtn.closest('.code-block-wrapper');
+        if (wrapper) {
+          const rawCode = wrapper.dataset.code ? decodeURIComponent(wrapper.dataset.code) : (wrapper.querySelector('code')?.textContent || '');
+          navigator.clipboard.writeText(rawCode).then(() => {
+            const origText = copyBtn.textContent;
+            copyBtn.textContent = 'Copied!';
+            copyBtn.style.color = 'var(--accent-bright)';
+            setTimeout(() => {
+              copyBtn.textContent = origText;
+              copyBtn.style.color = '';
+            }, 2000);
+          }).catch((err) => {
+            console.error('Failed to copy code:', err);
+          });
+        }
+      }
     });
+
+    // Manual bottom window height resize handle
+    const resizeHandle = document.getElementById('resize-handle');
+    if (resizeHandle) {
+      let isDragging = false;
+      let startY = 0;
+      let startH = 0;
+
+      resizeHandle.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startY = e.screenY;
+        const currentPanelH = dom.panel ? dom.panel.offsetHeight : 300;
+        startH = TOOLBAR_H + currentPanelH;
+        document.body.style.cursor = 'ns-resize';
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const deltaY = e.screenY - startY;
+        const newH = Math.max(TOOLBAR_H + 80, Math.min(800, startH + deltaY));
+        window.halo.resize(newH);
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          document.body.style.cursor = '';
+        }
+      });
+    }
 
     if (dom.menuClear) {
       dom.menuClear.addEventListener('click', (e) => {
@@ -507,8 +558,22 @@
     if (dom.btnExpand) dom.btnExpand.addEventListener('click', togglePanel);
 
     // Toast
-    if (dom.toastDismiss) dom.toastDismiss.addEventListener('click', hideToast);
-    if (dom.toastAccept) dom.toastAccept.addEventListener('click', hideToast);
+    if (dom.toastDismiss) {
+      dom.toastDismiss.addEventListener('click', () => {
+        state.lastSpokenText = null;
+        hideToast();
+      });
+    }
+
+    if (dom.toastAccept) {
+      dom.toastAccept.addEventListener('click', () => {
+        hideToast();
+        if (state.lastSpokenText || transcriptManager.hasContext()) {
+          state.lastSpokenText = null;
+          triggerAction('assist');
+        }
+      });
+    }
 
     // Hotkey recording
     document.querySelectorAll('.hotkey-input').forEach((input) => {
@@ -603,8 +668,9 @@
     dom.chevronIcon.style.transform = 'rotate(180deg)';
     // Resize window to fit content
     requestAnimationFrame(() => {
-      const contentH = dom.panel.scrollHeight;
-      const totalH = TOOLBAR_H + contentH;
+      const streamH = dom.responseStream ? dom.responseStream.scrollHeight : 0;
+      const desiredH = TOOLBAR_H + Math.max(260, streamH + 110);
+      const totalH = Math.min(550, desiredH);
       window.halo.resize(totalH);
     });
   }
@@ -633,9 +699,10 @@
 
     requestAnimationFrame(() => {
       isResizeScheduled = false;
-      const contentH = dom.panel ? (dom.panel.offsetHeight || dom.panel.scrollHeight) : 0;
-      const totalH = TOOLBAR_H + contentH;
-      if (Math.abs(totalH - lastResizedH) >= 2) {
+      const streamH = dom.responseStream ? dom.responseStream.scrollHeight : 0;
+      const desiredH = TOOLBAR_H + Math.max(260, streamH + 110);
+      const totalH = Math.min(550, desiredH);
+      if (Math.abs(totalH - lastResizedH) >= 4) {
         lastResizedH = totalH;
         window.halo.resize(totalH);
       }
@@ -666,7 +733,16 @@
     dom.statusText.textContent = text;
   }
 
-  // ─── Listening (Microphone with Valid WebM Headers) ──────────────────────
+  function handleSpokenTranscript(text) {
+    if (!text || !text.trim()) return;
+    const cleanText = text.trim();
+    transcriptManager.add(cleanText);
+    showTranscript(cleanText);
+    state.lastSpokenText = cleanText;
+    showToast(`🎤 "${cleanText}" — Click ✓ to Answer`);
+  }
+
+  // ─── Listening (VAD Voice Activity Detection — Zero Quota Waste) ────────
   async function toggleListening() {
     if (state.isListening) {
       stopListening();
@@ -677,6 +753,11 @@
 
   async function startListening() {
     try {
+      state.isListening = true;
+      dom.btnListen.classList.add('active');
+      setStatus('listening', 'Listening');
+      window.halo.setListeningState(true);
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -687,33 +768,13 @@
       });
 
       state.micStream = stream;
-      state.isListening = true;
-      dom.btnListen.classList.add('active');
-      setStatus('listening', 'Listening');
-      window.halo.setListeningState(true);
-
-      startRecordingSlice();
-
-      // Transcribe completed slices every 4 seconds
-      state.audioChunkInterval = setInterval(() => {
-        cycleRecordingSlice();
-      }, 4000);
-    } catch (err) {
-      console.error('Microphone access failed:', err);
-      setStatus('error', 'Mic Error');
-    }
-  }
-
-  function startRecordingSlice() {
-    if (!state.micStream || !state.isListening) return;
-
-    try {
       state.audioChunks = [];
+
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : 'audio/webm';
 
-      const recorder = new MediaRecorder(state.micStream, { mimeType });
+      const recorder = new MediaRecorder(stream, { mimeType });
       state.micRecorder = recorder;
 
       recorder.ondataavailable = (e) => {
@@ -722,37 +783,88 @@
         }
       };
 
-      recorder.onstop = async () => {
-        if (state.audioChunks.length > 0) {
-          const blob = new Blob(state.audioChunks, { type: mimeType });
-          state.audioChunks = [];
-          await processAudioBlob(blob);
+      recorder.start(500);
+
+      // Setup VAD (Voice Activity Detection) via Web Audio API
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      state.audioCtx = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+
+      const pcmData = new Float32Array(analyser.fftSize);
+      let isSpeaking = false;
+      let silenceStartTime = 0;
+
+      state.audioChunkInterval = setInterval(async () => {
+        if (!state.isListening) return;
+
+        analyser.getFloatTimeDomainData(pcmData);
+        let sum = 0;
+        for (let i = 0; i < pcmData.length; i++) {
+          sum += pcmData[i] * pcmData[i];
         }
-      };
+        const rms = Math.sqrt(sum / pcmData.length);
+        const volume = rms * 100;
 
-      recorder.start();
+        const now = Date.now();
+        if (volume > 2.0) {
+          isSpeaking = true;
+          silenceStartTime = 0;
+        } else {
+          if (isSpeaking) {
+            if (!silenceStartTime) silenceStartTime = now;
+            // Transcribe when user pauses for > 1.2s after speaking
+            if (now - silenceStartTime > 1200) {
+              isSpeaking = false;
+              silenceStartTime = 0;
+
+              if (state.audioChunks.length > 0) {
+                const chunksToProcess = [...state.audioChunks];
+                state.audioChunks = [];
+                const blob = new Blob(chunksToProcess, { type: mimeType });
+                if (blob.size > 1500) {
+                  await processAudioBlob(blob);
+                }
+              }
+            }
+          } else {
+            // Keep buffer trim during silence so we don't accumulate stale audio
+            if (state.audioChunks.length > 4) {
+              state.audioChunks = state.audioChunks.slice(-2);
+            }
+          }
+        }
+      }, 150);
+
+      showToast('🎙 Microphone Active — Listening for speech');
     } catch (err) {
-      console.error('Failed to start MediaRecorder slice:', err);
-    }
-  }
-
-  function cycleRecordingSlice() {
-    if (state.micRecorder && state.micRecorder.state === 'recording') {
-      const oldRecorder = state.micRecorder;
-      startRecordingSlice(); // Start new standalone slice first
-      oldRecorder.stop(); // Stop old slice to produce valid EBML container
+      console.error('Microphone access failed:', err);
+      setStatus('error', 'Mic Error');
+      state.isListening = false;
+      dom.btnListen.classList.remove('active');
+      window.halo.setListeningState(false);
     }
   }
 
   function stopListening() {
     state.isListening = false;
+
     if (state.audioChunkInterval) {
       clearInterval(state.audioChunkInterval);
       state.audioChunkInterval = null;
     }
 
+    if (state.audioCtx) {
+      try { state.audioCtx.close(); } catch(e) {}
+      state.audioCtx = null;
+    }
+
     if (state.micRecorder && state.micRecorder.state !== 'inactive') {
-      state.micRecorder.stop();
+      try { state.micRecorder.stop(); } catch(e) {}
+      state.micRecorder = null;
     }
 
     if (state.micStream) {
@@ -760,23 +872,25 @@
       state.micStream = null;
     }
 
+    state.audioChunks = [];
     dom.btnListen.classList.remove('active');
     setStatus('idle', 'Idle');
     window.halo.setListeningState(false);
   }
 
   async function processAudioBlob(blob) {
-    if (!blob || blob.size < 100) return;
+    if (!blob || blob.size < 1000) return;
     try {
       const arrayBuffer = await blob.arrayBuffer();
       const transcript = await window.halo.transcribeAudio(arrayBuffer, 'webm');
       if (transcript && transcript.trim()) {
-        const text = transcript.trim();
-        transcriptManager.add(text);
-        showToast(`🎤 "${text}"`);
+        handleSpokenTranscript(transcript.trim());
       }
     } catch (err) {
-      console.error('Audio transcription failed:', err.message);
+      console.warn('Audio transcription failed:', err.message);
+      if (err.message && err.message.includes('429')) {
+        showToast('⚠️ Quota limit reached — retrying shortly');
+      }
     }
   }
 
@@ -785,12 +899,15 @@
     const text = dom.inputField.value.trim();
     if (!text || state.isProcessing) return;
 
+    expandPanel();
     dom.inputField.value = '';
     await runAI('question', text);
   }
 
   async function triggerAction(action) {
     if (state.isProcessing) return;
+
+    expandPanel();
 
     let screenshot = null;
     try {
@@ -821,7 +938,9 @@
 
   async function runAI(action, userText, context) {
     if (!state.apiKey) {
-      appendResponse('system', 'Please set your API key in Settings first.');
+      autoExpand();
+      appendResponse('system', '⚠️ **API Key Required**\nPlease set your OpenAI or Gemini API key in **Settings** (⚙ top right) to start receiving AI answers.');
+      showToast('API Key Required — Click ⚙ Settings');
       openSettings();
       return;
     }
@@ -879,8 +998,14 @@
         state.conversationHistory = state.conversationHistory.slice(-MAX_CONVERSATION_HISTORY);
       }
     } catch (err) {
-      bodyEl.textContent = `Error: ${err.message}`;
-      bodyEl.style.color = 'var(--status-error)';
+      const is429 = (err.message || '').includes('429') || (err.message || '').includes('Rate Limit') || (err.message || '').includes('RESOURCE_EXHAUSTED');
+      if (is429) {
+        renderMarkdown(bodyEl, '⏳ **API Quota Exceeded (429)**\n\nYour Gemini API key has reached Google\'s Free Tier daily/minute request limit (`RESOURCE_EXHAUSTED`).\n\n**Quick Solutions:**\n1. Wait **15–30 seconds** for the per-minute quota window to reset.\n2. Create a standard Gemini API key (starts with `AIzaSy...`) at **[aistudio.google.com](https://aistudio.google.com/app/apikey)**.\n3. Or paste an **OpenAI API Key** (`sk-...`) in **Settings (⚙)** for GPT-4o & Whisper STT access.');
+        showToast('Quota Exceeded (429) — Click ⚙ Settings');
+        openSettings();
+      } else {
+        renderMarkdown(bodyEl, `⚠️ **Error**: ${escapeHtml(err.message)}`);
+      }
     } finally {
       bodyEl.classList.remove('streaming-cursor');
       state.isProcessing = false;
@@ -930,7 +1055,28 @@
     });
   }
 
-  // ─── Markdown Rendering (Lightweight) ──────────────────────────────────
+  // ─── Markdown & LaTeX Rendering ──────────────────────────────────
+  function formatLaTeX(str) {
+    if (!str) return '';
+    return str
+      .replace(/\\mathcal\{O\}/g, 'O')
+      .replace(/\\mathcal\{([^\}]+)\}/g, '$1')
+      .replace(/\\text\{([^\}]+)\}/g, '$1')
+      .replace(/\\mathrm\{([^\}]+)\}/g, '$1')
+      .replace(/\\mathbb\{([^\}]+)\}/g, '$1')
+      .replace(/\\min/g, 'min')
+      .replace(/\\max/g, 'max')
+      .replace(/\\le/g, '≤')
+      .replace(/\\ge/g, '≥')
+      .replace(/\\neq/g, '≠')
+      .replace(/\\times/g, '×')
+      .replace(/\\cdot/g, '·')
+      .replace(/\\in/g, '∈')
+      .replace(/\\rightarrow/g, '→')
+      .replace(/\\leftarrow/g, '←')
+      .replace(/\\/g, '');
+  }
+
   function renderMarkdown(el, text) {
     let source = text || '';
 
@@ -940,10 +1086,25 @@
       source += '\n```';
     }
 
-    let html = escapeHtml(source);
+    // Extract code blocks first to protect unescaped code formatting
+    const codeBlocks = [];
+    source = source.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+      const id = `___CODE_BLOCK_${codeBlocks.length}___`;
+      codeBlocks.push({ lang: lang || 'code', code });
+      return id;
+    });
 
-    // Code blocks (```...```)
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>');
+    // Parse block math ($$ ... $$)
+    source = source.replace(/\$\$\n?([\s\S]*?)\n?\$\$/g, (match, math) => {
+      return `\n\n<div class="math-block">${escapeHtml(formatLaTeX(math))}</div>\n\n`;
+    });
+
+    // Parse inline math ($ ... $)
+    source = source.replace(/\$([^\$\n]+)\$/g, (match, math) => {
+      return `<span class="math-inline">${escapeHtml(formatLaTeX(math))}</span>`;
+    });
+
+    let html = escapeHtml(source);
 
     // Inline code
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -966,7 +1127,6 @@
     // Unordered lists
     html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
     html = html.replace(/((?:<li(?:\s[^>]*)?>.*<\/li>\n?)+)/g, (match) => {
-      // Determine if this block contains checkboxes → use <ul class="checklist">
       if (match.includes('class="checkbox')) {
         return `<ul class="checklist">${match}</ul>`;
       }
@@ -976,23 +1136,33 @@
     // Ordered lists
     html = html.replace(/^\d+\. (.+)$/gm, '<li class="ol-item">$1</li>');
     html = html.replace(/((?:<li class="ol-item">.*<\/li>\n?)+)/g, '<ol>$1</ol>');
-    // Clean up the marker class
     html = html.replace(/ class="ol-item"/g, '');
 
     // Paragraphs (double newline)
     html = html.replace(/\n\n/g, '</p><p>');
     html = '<p>' + html + '</p>';
 
-    // Clean up empty paragraphs
+    // Clean up empty paragraphs & wrapper divs
     html = html.replace(/<p><\/p>/g, '');
     html = html.replace(/<p>(<h[234]>)/g, '$1');
     html = html.replace(/(<\/h[234]>)<\/p>/g, '$1');
+    html = html.replace(/<p>(<div class="math-block">)/g, '$1');
+    html = html.replace(/(<\/div>)<\/p>/g, '$1');
     html = html.replace(/<p>(<pre>)/g, '$1');
     html = html.replace(/(<\/pre>)<\/p>/g, '$1');
     html = html.replace(/<p>(<ul[^>]*>)/g, '$1');
     html = html.replace(/(<\/ul>)<\/p>/g, '$1');
     html = html.replace(/<p>(<ol>)/g, '$1');
     html = html.replace(/(<\/ol>)<\/p>/g, '$1');
+
+    // Re-insert code blocks with exact unescaped code string & copy button header
+    for (let i = 0; i < codeBlocks.length; i++) {
+      const { lang, code } = codeBlocks[i];
+      const encodedCode = encodeURIComponent(code);
+      const escapedCode = escapeHtml(code);
+      const codeHtml = `<div class="code-block-wrapper" data-code="${encodedCode}"><div class="code-block-header"><span class="code-lang">${escapeHtml(lang)}</span><button class="copy-code-btn" type="button">Copy</button></div><pre><code class="lang-${escapeHtml(lang)}">${escapedCode}</code></pre></div>`;
+      html = html.replace(`___CODE_BLOCK_${i}___`, codeHtml);
+    }
 
     el.innerHTML = html;
   }
