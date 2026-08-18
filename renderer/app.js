@@ -1027,7 +1027,11 @@
     }
 
     if (context?.screenshot) {
-      parts.push('[SCREENSHOT attached — analyze the visible content]');
+      if (action === 'solveCode') {
+        parts.push('[SCREENSHOT attached — analyze the LeetCode / programming problem, editor signature, constraints, and provide an optimal solution]');
+      } else {
+        parts.push('[SCREENSHOT attached — analyze the visible content]');
+      }
     }
 
     return parts.join('\n\n') || 'Analyze the current screen and provide assistance.';

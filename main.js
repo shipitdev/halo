@@ -212,18 +212,22 @@ function registerHotkeys() {
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 function setupIPC() {
-  // Screenshot capture — high resolution JPEG (max 1600px width) for clear text on scrollable pages
+  // Screenshot capture — high-fidelity JPEG (max 1920px width, quality 85) for crisp code & LeetCode text OCR
   ipcMain.handle('halo:capture-screen', async () => {
     try {
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width, height } = primaryDisplay.size;
+      const targetWidth = Math.min(width || 1920, 1920);
+
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
-        thumbnailSize: { width: 1920, height: 1080 },
+        thumbnailSize: { width: targetWidth, height: Math.round((targetWidth * 9) / 16) },
       });
 
       if (sources.length === 0) return null;
 
       const thumb = sources[0].thumbnail;
-      const resized = thumb.resize({ width: 1600 });
+      const resized = thumb.width > targetWidth ? thumb.resize({ width: targetWidth }) : thumb;
       const jpegBuf = resized.toJPEG(85);
       return `data:image/jpeg;base64,${jpegBuf.toString('base64')}`;
     } catch (err) {
@@ -407,7 +411,7 @@ function setupIPC() {
 
           userMsg.content = [
             { type: 'text', text: textPrompt },
-            { type: 'image_url', image_url: { url: screenshot, detail: 'low' } },
+            { type: 'image_url', image_url: { url: screenshot, detail: 'high' } },
           ];
         }
       }
