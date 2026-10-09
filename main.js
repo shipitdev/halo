@@ -231,6 +231,11 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('halo:config-save', (_event, values) => {
+    config.update(values);
+    registerHotkeys();
+  });
+
   ipcMain.handle('halo:config-get-all', () => {
     return config.getAll();
   });
