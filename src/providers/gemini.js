@@ -5,6 +5,12 @@
 
 const { BaseProvider } = require('./base');
 
+const GEMINI_TRANSCRIPTION_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash-lite',
+];
+
 class GeminiProvider extends BaseProvider {
   get name() {
     return 'Google Gemini';
@@ -12,8 +18,8 @@ class GeminiProvider extends BaseProvider {
 
   get models() {
     return {
-      smart: 'gemini-2.0-flash',
-      fast: 'gemini-2.0-flash-lite',
+      smart: 'gemini-3.6-flash',
+      fast: 'gemini-3.5-flash',
     };
   }
 
@@ -89,7 +95,7 @@ class GeminiProvider extends BaseProvider {
 
     let response;
     // Valid Google Gemini API model names in order of fallback
-    const fallbackModels = [model, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-lite'];
+    const fallbackModels = [model, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
     const uniqueFallbacks = [...new Set(fallbackModels)];
 
     let lastError = null;
@@ -137,9 +143,8 @@ class GeminiProvider extends BaseProvider {
     const base64Audio = audioBuffer.toString('base64');
     const mimeType = format === 'wav' ? 'audio/wav' : `audio/${format}`;
 
-    const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
     let lastErr;
-    for (const m of models) {
+    for (const m of GEMINI_TRANSCRIPTION_MODELS) {
       try {
         const response = await ai.models.generateContent({
           model: m,
@@ -175,4 +180,4 @@ class GeminiProvider extends BaseProvider {
   }
 }
 
-module.exports = { GeminiProvider };
+module.exports = { GeminiProvider, GEMINI_TRANSCRIPTION_MODELS };

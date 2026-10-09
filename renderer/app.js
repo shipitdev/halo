@@ -10,11 +10,10 @@
   // ─── Constants ──────────────────────────────────────────────────────────
   const MAX_TRANSCRIPT_ENTRIES = 50;
   const MAX_CONVERSATION_HISTORY = 20;
-  const DEDUP_SIMILARITY_THRESHOLD = 0.6;
 
   // ─── Transcript Manager ─────────────────────────────────────────────────
   /**
-   * Manages timestamped transcript entries with deduplication and meeting context.
+   * Manages timestamped transcript entries and meeting context.
    * Replaces the flat transcriptBuffer string for richer LLM context.
    */
   class TranscriptManager {
@@ -25,26 +24,11 @@
     }
 
     /**
-     * Add a new transcript chunk with deduplication.
-     * If the new chunk overlaps significantly with the last entry, merge instead of appending.
+     * Keep each independently recorded utterance, including similar or repeated sentences.
      */
     add(text) {
       if (!text || !text.trim()) return;
       const trimmed = text.trim();
-
-      // Deduplication: check overlap with last entry
-      if (this.entries.length > 0) {
-        const lastEntry = this.entries[this.entries.length - 1];
-        const similarity = this._similarity(lastEntry.text, trimmed);
-        if (similarity > DEDUP_SIMILARITY_THRESHOLD) {
-          // Merge: keep the longer version
-          if (trimmed.length > lastEntry.text.length) {
-            lastEntry.text = trimmed;
-            lastEntry.timestamp = new Date().toISOString();
-          }
-          return;
-        }
-      }
 
       this.entries.push({
         text: trimmed,
@@ -102,18 +86,7 @@
       this.entries = [];
     }
 
-    /** Compute simple word-overlap similarity between two strings (0-1). */
-    _similarity(a, b) {
-      const wordsA = new Set(a.toLowerCase().split(/\s+/));
-      const wordsB = new Set(b.toLowerCase().split(/\s+/));
-      if (wordsA.size === 0 || wordsB.size === 0) return 0;
 
-      let overlap = 0;
-      for (const w of wordsA) {
-        if (wordsB.has(w)) overlap++;
-      }
-      return overlap / Math.max(wordsA.size, wordsB.size);
-    }
   }
 
   // ─── State ──────────────────────────────────────────────────────────────
@@ -129,8 +102,6 @@
     sttApiKey: '',
     conversationHistory: [],
     micStream: null,
-    micRecorder: null,
-    audioChunks: [],
     audioChunkInterval: null,
   };
 
@@ -182,6 +153,7 @@
     dom.inputApiKey = $('input-api-key');
     dom.selectSttProvider = $('select-stt-provider');
     dom.inputSttKey = $('input-stt-key');
+    dom.audioInput = $('select-audio-input');
     dom.hotkeyToggle = $('hotkey-toggle');
     dom.hotkeyAssist = $('hotkey-assist');
     dom.hotkeyCode = $('hotkey-code');
@@ -226,6 +198,7 @@
         state.apiKey = config.apiKey || '';
         state.sttProvider = config.sttProvider || 'openai';
         state.sttApiKey = config.sttApiKey || '';
+        state.audioInputDeviceId = config.audioInputDeviceId || '';
         state.useSmart = config.useSmart !== false;
         state.hotkeys = config.hotkeys || {
           toggleOverlay: 'CommandOrControl+B',
@@ -244,6 +217,7 @@
     state.apiKey = dom.inputApiKey.value;
     state.sttProvider = dom.selectSttProvider.value;
     state.sttApiKey = dom.inputSttKey.value;
+    state.audioInputDeviceId = dom.audioInput.value;
 
     const newHotkeys = {
       toggleOverlay: dom.hotkeyToggle ? dom.hotkeyToggle.value : 'CommandOrControl+B',
@@ -258,6 +232,7 @@
       await window.halo.settings.set('apiKey', state.apiKey);
       await window.halo.settings.set('sttProvider', state.sttProvider);
       await window.halo.settings.set('sttApiKey', state.sttApiKey);
+      await window.halo.settings.set('audioInputDeviceId', state.audioInputDeviceId);
       await window.halo.settings.set('useSmart', state.useSmart);
       await window.halo.settings.set('hotkeys', state.hotkeys);
     } catch (err) {
@@ -272,6 +247,13 @@
     dom.inputApiKey.value = state.apiKey;
     dom.selectSttProvider.value = state.sttProvider;
     dom.inputSttKey.value = state.sttApiKey;
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      dom.audioInput.replaceChildren(new Option('Default microphone', ''));
+      for (const device of devices.filter(device => device.kind === 'audioinput')) {
+        dom.audioInput.add(new Option(device.label || 'Audio input', device.deviceId));
+      }
+      dom.audioInput.value = state.audioInputDeviceId || '';
+    }).catch(err => showToast(`Cannot list audio inputs: ${err.message}`));
 
     if (state.hotkeys) {
       if (dom.hotkeyToggle && state.hotkeys.toggleOverlay) dom.hotkeyToggle.value = state.hotkeys.toggleOverlay;
@@ -440,7 +422,7 @@
     if (dom.btnSay) dom.btnSay.addEventListener('click', () => triggerAction('say'));
     if (dom.btnFollowup) dom.btnFollowup.addEventListener('click', () => triggerAction('followup'));
     if (dom.btnRecap) dom.btnRecap.addEventListener('click', () => triggerAction('recap'));
-    if (dom.btnCode) dom.btnCode.addEventListener('click', () => triggerAction('solveCode'));
+    if (dom.btnCode) dom.btnCode.addEventListener('click', () => triggerAction('analyzeScreen'));
 
     // Model toggle
     if (dom.btnModelToggle) dom.btnModelToggle.addEventListener('click', toggleModel);
@@ -568,7 +550,7 @@
     if (dom.toastAccept) {
       dom.toastAccept.addEventListener('click', () => {
         hideToast();
-        if (state.lastSpokenText || transcriptManager.hasContext()) {
+        if (state.lastSpokenText || transcriptManager.hasContent()) {
           state.lastSpokenText = null;
           triggerAction('assist');
         }
@@ -752,6 +734,9 @@
   }
 
   async function startListening() {
+    if (state.isListening) return;
+    const session = (state.listenSession || 0) + 1;
+    state.listenSession = session;
     try {
       state.isListening = true;
       dom.btnListen.classList.add('active');
@@ -760,6 +745,7 @@
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          ...(state.audioInputDeviceId ? { deviceId: { exact: state.audioInputDeviceId } } : {}),
           channelCount: 1,
           sampleRate: 16000,
           echoCancellation: true,
@@ -767,81 +753,48 @@
         },
       });
 
+      if (!state.isListening || state.listenSession !== session) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       state.micStream = stream;
-      state.audioChunks = [];
-
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
-
-      const recorder = new MediaRecorder(stream, { mimeType });
-      state.micRecorder = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          state.audioChunks.push(e.data);
-        }
-      };
-
-      recorder.start(500);
+      state.voiceRecorder = new VoiceRecorder(stream, {
+        onAudio: (blob, format) => processAudioBlob(blob, format, session),
+        onError: err => {
+          if (state.listenSession !== session) return;
+          stopListening();
+          showToast(`Audio capture failed: ${err.message}`);
+        },
+      });
 
       // Setup VAD (Voice Activity Detection) via Web Audio API
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioCtx();
       state.audioCtx = audioCtx;
+      await audioCtx.resume();
+      if (!state.isListening || state.listenSession !== session) return;
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser);
 
       const pcmData = new Float32Array(analyser.fftSize);
-      let isSpeaking = false;
-      let silenceStartTime = 0;
-
-      state.audioChunkInterval = setInterval(async () => {
-        if (!state.isListening) return;
-
+      state.audioChunkInterval = setInterval(() => {
         analyser.getFloatTimeDomainData(pcmData);
         let sum = 0;
-        for (let i = 0; i < pcmData.length; i++) {
-          sum += pcmData[i] * pcmData[i];
-        }
-        const rms = Math.sqrt(sum / pcmData.length);
-        const volume = rms * 100;
-
-        const now = Date.now();
-        if (volume > 2.0) {
-          isSpeaking = true;
-          silenceStartTime = 0;
-        } else {
-          if (isSpeaking) {
-            if (!silenceStartTime) silenceStartTime = now;
-            // Transcribe when user pauses for > 1.2s after speaking
-            if (now - silenceStartTime > 1200) {
-              isSpeaking = false;
-              silenceStartTime = 0;
-
-              if (state.audioChunks.length > 0) {
-                const chunksToProcess = [...state.audioChunks];
-                state.audioChunks = [];
-                const blob = new Blob(chunksToProcess, { type: mimeType });
-                if (blob.size > 1500) {
-                  await processAudioBlob(blob);
-                }
-              }
-            }
-          } else {
-            // Keep buffer trim during silence so we don't accumulate stale audio
-            if (state.audioChunks.length > 4) {
-              state.audioChunks = state.audioChunks.slice(-2);
-            }
-          }
-        }
+        for (const sample of pcmData) sum += sample * sample;
+        state.voiceRecorder.sample(Math.sqrt(sum / pcmData.length));
       }, 150);
+      stream.getAudioTracks().forEach(track => track.addEventListener('ended', () => {
+        if (state.listenSession === session) stopListening();
+      }));
 
       showToast('🎙 Microphone Active — Listening for speech');
     } catch (err) {
+      if (state.listenSession !== session) return;
+      stopListening();
       console.error('Microphone access failed:', err);
+      showToast(`Microphone access failed: ${err.message}`);
       setStatus('error', 'Mic Error');
       state.isListening = false;
       dom.btnListen.classList.remove('active');
@@ -862,9 +815,9 @@
       state.audioCtx = null;
     }
 
-    if (state.micRecorder && state.micRecorder.state !== 'inactive') {
-      try { state.micRecorder.stop(); } catch(e) {}
-      state.micRecorder = null;
+    if (state.voiceRecorder) {
+      state.voiceRecorder.stop();
+      state.voiceRecorder = null;
     }
 
     if (state.micStream) {
@@ -872,24 +825,26 @@
       state.micStream = null;
     }
 
-    state.audioChunks = [];
     dom.btnListen.classList.remove('active');
     setStatus('idle', 'Idle');
     window.halo.setListeningState(false);
   }
 
-  async function processAudioBlob(blob) {
+  async function processAudioBlob(blob, format, session) {
     if (!blob || blob.size < 1000) return;
     try {
       const arrayBuffer = await blob.arrayBuffer();
-      const transcript = await window.halo.transcribeAudio(arrayBuffer, 'webm');
+      const transcript = await window.halo.transcribeAudio(arrayBuffer, format);
+      if (state.listenSession !== session) return;
       if (transcript && transcript.trim()) {
         handleSpokenTranscript(transcript.trim());
       }
     } catch (err) {
       console.warn('Audio transcription failed:', err.message);
       if (err.message && err.message.includes('429')) {
-        showToast('⚠️ Quota limit reached — retrying shortly');
+        showToast('Transcription quota reached. Try again shortly.');
+      } else {
+        showToast('Transcription failed. Check the STT provider and API key in Settings.');
       }
     }
   }
@@ -897,7 +852,7 @@
   // ─── Actions ────────────────────────────────────────────────────────────
   async function handleSend() {
     const text = dom.inputField.value.trim();
-    if (!text || state.isProcessing) return;
+    if (!text || state.isProcessing || state.isCapturing) return;
 
     expandPanel();
     dom.inputField.value = '';
@@ -905,20 +860,34 @@
   }
 
   async function triggerAction(action) {
-    if (state.isProcessing) return;
-
-    expandPanel();
-
+    if (state.isProcessing || state.isCapturing) return;
+    if (!state.apiKey) {
+      await runAI(action);
+      return;
+    }
+    state.isCapturing = true;
+    const inputText = dom.inputField.value.trim();
+    setStatus('thinking', 'Capturing');
     let screenshot = null;
     try {
       screenshot = await window.halo.captureScreen();
+      if (!screenshot) throw new Error('No screen image was returned.');
     } catch (err) {
-      console.warn('Screen capture failed, proceeding without screenshot:', err);
+      console.warn('Screen capture failed:', err);
+      if (action === 'solveCode' || action === 'analyzeScreen') {
+        setStatus('error', 'Screen access');
+        expandPanel();
+        appendResponse('system', `${err.message} Check Screen Recording access in System Settings, then restart Halo if needed.`);
+        return;
+      }
+      showToast('Screen unavailable. Check Screen Recording permission.');
+    } finally {
+      state.isCapturing = false;
     }
 
     const transcript = transcriptManager.buildContext();
-    const inputText = dom.inputField.value.trim();
-    dom.inputField.value = '';
+    if (dom.inputField.value.trim() === inputText) dom.inputField.value = '';
+    expandPanel();
 
     // Auto-select meetingAssist if in a meeting and action is 'assist' or 'say'
     let effectiveAction = action;
@@ -975,6 +944,7 @@
       followup: '→ Follow-up',
       recap: '📋 Recap',
       solveCode: '< > Solve Code',
+      analyzeScreen: 'Screen Analysis',
       question: '? Question',
       meetingAssist: '🎯 Meeting Assist',
     };
