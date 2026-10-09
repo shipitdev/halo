@@ -856,7 +856,7 @@
 
     expandPanel();
     dom.inputField.value = '';
-    await runAI('question', text);
+    await runAI('question', text, { transcript: transcriptManager.buildContext() || null });
   }
 
   async function triggerAction(action) {
@@ -889,9 +889,9 @@
     if (dom.inputField.value.trim() === inputText) dom.inputField.value = '';
     expandPanel();
 
-    // Auto-select meetingAssist if in a meeting and action is 'assist' or 'say'
+    // Use the active session, not historical transcript tags, to choose meeting help.
     let effectiveAction = action;
-    if (transcriptManager.hasMeetingContext() && (action === 'assist' || action === 'say')) {
+    if (transcriptManager.activeMeeting && action === 'assist') {
       effectiveAction = 'meetingAssist';
     }
 
@@ -984,9 +984,8 @@
   }
 
   function buildUserContent(action, userText, context) {
-    if (userText) return userText;
-
     const parts = [];
+    if (userText) parts.push(`[USER QUESTION]\n${userText}`);
 
     if (context?.transcript) {
       parts.push(`[LIVE TRANSCRIPT]\n${context.transcript}\n[/LIVE TRANSCRIPT]`);

@@ -69,6 +69,9 @@ function createOverlayWindow() {
     },
   });
 
+  // Best effort: newer macOS ScreenCaptureKit clients may still capture this window.
+  mainWindow.setContentProtection(true);
+
   // Float above everything, including fullscreen apps
   mainWindow.setAlwaysOnTop(true, 'floating', 1);
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });

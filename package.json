@@ -6,7 +6,7 @@
   "author": "shipitdev",
   "main": "main.js",
   "scripts": {
-    "test": "node test-modules.js && node test-full-app.js && node --test test-audio-behavior.js test-screen-behavior.js",
+    "test": "node test-modules.js && node test-full-app.js && node --test test-*-behavior.js",
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --mac zip"
