@@ -1,3 +1,4 @@
+require('./test-isolation');
 /**
  * Halo — Comprehensive End-to-End Component Test Suite
  * Tests every component and module in the application for functional correctness.
@@ -262,6 +263,9 @@ async function runAllTests() {
       assert(preloadContent.includes(`'${channel}'`), `IPC channel ${channel} missing in preload.js`);
       assert(mainContent.includes(`'${channel}'`), `IPC handler for ${channel} missing in main.js`);
     }
+
+    assert(mainContent.includes("config.get('sttApiKey'"), 'Dedicated transcription API key is not used');
+    assert(mainContent.includes("require('./src/capture')"), 'Main process bypasses the shared capture module');
   });
 
   // 9. Prompt Single Source of Truth Audit
@@ -378,8 +382,8 @@ async function runAllTests() {
 
     assert(appContent.includes('class TranscriptManager'),
       'Should contain TranscriptManager class');
-    assert(appContent.includes('_similarity'),
-      'TranscriptManager should have deduplication logic');
+    assert(appContent.includes('this.entries.push'),
+      'TranscriptManager should preserve independently captured utterances');
     assert(appContent.includes('meetingContext'),
       'TranscriptManager should track meeting context');
     assert(appContent.includes('buildContext'),

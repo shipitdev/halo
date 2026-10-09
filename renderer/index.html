@@ -160,9 +160,15 @@
           <section class="settings-section">
             <h3>Transcription</h3>
             <div class="setting-row">
+              <label for="select-audio-input">Audio input</label>
+              <select id="select-audio-input"><option value="">Default microphone</option></select>
+            </div>
+            <p>For meeting audio on macOS, select a loopback or mixed microphone + system audio device. Meeting detection alone does not record participants.</p>
+            <div class="setting-row">
               <label for="select-stt-provider">STT Provider</label>
               <select id="select-stt-provider">
                 <option value="openai">OpenAI Whisper</option>
+                <option value="groq">Groq Whisper</option>
                 <option value="gemini">Gemini</option>
               </select>
             </div>
@@ -228,6 +234,7 @@
   </div>
 
   <script src="icons.js"></script>
+  <script src="voice-recorder.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

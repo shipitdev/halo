@@ -25,7 +25,7 @@ class OpenAIProvider extends BaseProvider {
     const maxTokens = options.maxTokens || 4096;
 
     const OpenAI = require('openai');
-    const client = new OpenAI({ apiKey: this.apiKey });
+    const client = new OpenAI({ apiKey: this.apiKey, ...(this.options.baseURL ? { baseURL: this.options.baseURL } : {}) });
 
     const stream = await client.chat.completions.create({
       model,
@@ -48,7 +48,7 @@ class OpenAIProvider extends BaseProvider {
   async transcribe(audioBuffer, format = 'webm') {
     const OpenAI = require('openai');
     const { toFile } = OpenAI;
-    const client = new OpenAI({ apiKey: this.apiKey });
+    const client = new OpenAI({ apiKey: this.apiKey, ...(this.options.baseURL ? { baseURL: this.options.baseURL } : {}) });
 
     const file = await toFile(audioBuffer, `audio.${format}`, {
       type: `audio/${format}`,
@@ -56,7 +56,7 @@ class OpenAIProvider extends BaseProvider {
 
     const response = await client.audio.transcriptions.create({
       file,
-      model: 'whisper-1',
+      model: this.options.transcriptionModel || 'whisper-1',
     });
 
     return response.text;

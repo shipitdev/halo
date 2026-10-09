@@ -10,7 +10,6 @@ const {
   Menu,
   ipcMain,
   globalShortcut,
-  desktopCapturer,
   nativeImage,
   screen,
   dialog,
@@ -19,6 +18,7 @@ const path = require('path');
 const { ConfigManager } = require('./src/config');
 const { KnowledgeBase } = require('./src/knowledge');
 const { MeetingDetector } = require('./src/meetings');
+const { captureScreen } = require('./src/capture');
 const { createProvider, getTranscriptionProvider, getModel } = require('./src/providers');
 const { getPrompt } = require('./src/prompts');
 
@@ -212,28 +212,9 @@ function registerHotkeys() {
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 function setupIPC() {
-  // Screenshot capture — high-fidelity JPEG (max 1920px width, quality 85) for crisp code & LeetCode text OCR
+  // Capture the overlay display without Halo covering the content.
   ipcMain.handle('halo:capture-screen', async () => {
-    try {
-      const primaryDisplay = screen.getPrimaryDisplay();
-      const { width, height } = primaryDisplay.size;
-      const targetWidth = Math.min(width || 1920, 1920);
-
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: targetWidth, height: Math.round((targetWidth * 9) / 16) },
-      });
-
-      if (sources.length === 0) return null;
-
-      const thumb = sources[0].thumbnail;
-      const resized = thumb.width > targetWidth ? thumb.resize({ width: targetWidth }) : thumb;
-      const jpegBuf = resized.toJPEG(85);
-      return `data:image/jpeg;base64,${jpegBuf.toString('base64')}`;
-    } catch (err) {
-      console.error('Screenshot capture failed:', err);
-      return null;
-    }
+    return captureScreen({ overlayWindow: mainWindow });
   });
 
   // Config management
@@ -444,11 +425,14 @@ function setupIPC() {
   ipcMain.handle('halo:transcribe-audio', async (_event, audioBuffer, format = 'webm') => {
     try {
       const buf = Buffer.isBuffer(audioBuffer) ? audioBuffer : Buffer.from(audioBuffer);
-      const primaryProviderName = config.get('sttProvider', 'gemini');
-      const openaiKey = config.get('openaiApiKey') || (config.get('provider') === 'openai' ? config.get('apiKey') : '');
-      const geminiKey = config.get('geminiApiKey') || (config.get('provider') === 'gemini' ? config.get('apiKey') : '');
+      if (!['webm', 'wav', 'mp4'].includes(format) || !buf.length || buf.length > 25 * 1024 * 1024) throw new Error('Invalid audio format or size.');
+      const primaryProviderName = config.get('sttProvider', 'openai');
+      const sttKey = config.get('sttApiKey', '');
+      const openaiKey = (primaryProviderName === 'openai' && sttKey) || config.get('openaiApiKey') || (config.get('provider') === 'openai' ? config.get('apiKey') : '');
+      const geminiKey = (primaryProviderName === 'gemini' && sttKey) || config.get('geminiApiKey') || (config.get('provider') === 'gemini' ? config.get('apiKey') : '');
 
       const providersToTry = [];
+      if (primaryProviderName === 'groq' && sttKey) providersToTry.push({ name: 'openai', key: sttKey, options: { baseURL: 'https://api.groq.com/openai/v1', transcriptionModel: 'whisper-large-v3-turbo' } });
       if (primaryProviderName === 'openai' && openaiKey) {
         providersToTry.push({ name: 'openai', key: openaiKey });
         if (geminiKey) providersToTry.push({ name: 'gemini', key: geminiKey });
@@ -458,23 +442,25 @@ function setupIPC() {
       }
 
       if (providersToTry.length === 0) {
-        return '';
+        throw new Error('No transcription API key is configured. Add one in Settings.');
       }
 
+      let lastError;
       for (const pConfig of providersToTry) {
         try {
-          const p = createProvider(pConfig.name, pConfig.key);
+          const p = createProvider(pConfig.name, pConfig.key, pConfig.options);
           if (p.supportsTranscription()) {
             return await p.transcribe(buf, format);
           }
         } catch (err) {
+          lastError = err;
           console.warn(`[STT Warning] ${pConfig.name}:`, err.message);
         }
       }
-      return '';
+      throw lastError || new Error('Audio transcription failed.');
     } catch (err) {
       console.warn('[STT Error]:', err.message);
-      return '';
+      throw err;
     }
   });
 }

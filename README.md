@@ -63,3 +63,33 @@ On first launch, open **Settings** (⚙ top right of toolbar) to enter your **Ge
 ## 📄 License
 
 GPL-3.0 — Copyright (c) 2026 shipitdev
+
+### Audio transcription
+
+In Settings, choose OpenAI Whisper, Gemini, or Groq Whisper. Groq requires its own
+STT API key and uses `whisper-large-v3-turbo` through the existing OpenAI SDK.
+No additional SDK is needed. Audio is sent to the selected cloud provider; configured
+OpenAI or Gemini keys can be used as fallbacks if that request fails.
+
+The audio input defaults to the microphone. On this project's Electron 33 build,
+meeting detection does **not** capture system playback. To transcribe remote
+participants, route meeting playback through an installed loopback input and select
+it under **Audio input**. To capture yourself too, choose an input that mixes the
+microphone and system playback. Input names may appear only after microphone
+permission has been granted. Restart listening after changing the input.
+
+Each recording ends after a speech pause or 20 seconds and includes a complete file
+header. Stopping listening flushes unfinished speech. Requests run in capture order;
+results from a previous listening session are ignored after a new session starts.
+
+Run `npm test` for module, component, and audio behavior checks. Tests store settings
+and documents in temporary directories rather than changing your Halo profile.
+
+### Screen analysis
+
+The Screen button captures the display containing Halo, briefly hides the overlay,
+and restores it without taking focus. It captures before expanding the response panel.
+Images use lossless PNG at up to 2560 pixels wide, taking Retina scale into account.
+Screen analysis follows your typed note or explains the visible task; the coding
+hotkey keeps its dedicated coding prompt. A failed capture preserves your note and
+shows the error instead of asking the model to answer without the image.

@@ -1,15 +1,22 @@
+require('./test-isolation');
 /**
  * Halo — Module Validation Tests
  * Validates that all modules load and core logic functions correctly.
  * Run with: node test-modules.js
  */
 
+const pendingTests = [];
 let passed = 0;
 let failed = 0;
 
 function test(name, fn) {
   try {
-    fn();
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      pendingTests.push(result.then(() => { console.log(`  ✓ ${name}`); passed++; })
+        .catch(err => { console.error(`  ✗ ${name} — ${err.message}`); failed++; }));
+      return;
+    }
     console.log(`  ✓ ${name}`);
     passed++;
   } catch (err) {
@@ -59,11 +66,26 @@ test('anthropic.js loads', () => {
 });
 
 test('gemini.js loads', () => {
-  const { GeminiProvider } = require('./src/providers/gemini');
+  const { GeminiProvider, GEMINI_TRANSCRIPTION_MODELS } = require('./src/providers/gemini');
   assert(GeminiProvider, 'GeminiProvider not exported');
   const p = new GeminiProvider('test-key');
   assert(p.name === 'Google Gemini');
+  assert(p.models.smart === 'gemini-3.6-flash');
+  assert(p.models.fast === 'gemini-3.5-flash');
+  assert(GEMINI_TRANSCRIPTION_MODELS[0] === 'gemini-3.5-flash-lite');
+  assert(!GEMINI_TRANSCRIPTION_MODELS.some((model) => model.startsWith('gemini-2.0')));
   assert(p.supportsTranscription() === true);
+});
+
+test('screen capture selects the primary display source', () => {
+  const { selectDisplaySource } = require('./src/capture');
+  const sources = [
+    { display_id: '2', name: 'Screen 2' },
+    { display_id: '1', name: 'Screen 1' },
+  ];
+  assert(selectDisplaySource(sources, 1) === sources[1]);
+  assert(selectDisplaySource(sources, 99) === null);
+  assert(selectDisplaySource([], 1) === null);
 });
 
 test('index.js factory works', () => {
@@ -266,7 +288,7 @@ test('_matchMeetingApp correctly matches full process names', () => {
   assert(teamsMatch && teamsMatch.id === 'teams', 'Should match MSTeams');
 });
 
-test('Meeting debounce prevents premature end events', () => {
+test('Meeting debounce prevents premature end events', async () => {
   const { MeetingDetector, END_DEBOUNCE_COUNT } = require('./src/meetings');
   const detector = new MeetingDetector();
   const events = [];
@@ -284,7 +306,8 @@ test('Meeting debounce prevents premature end events', () => {
   };
 
   // Start polling synchronously for testing
-  (async () => {
+  detector._isPolling = true;
+  await (async () => {
     // Poll 1: detect meeting
     await runPoll();
     assert(events.length === 1, `Expected 1 event after first poll, got ${events.length}`);
@@ -305,7 +328,7 @@ test('Meeting debounce prevents premature end events', () => {
   detector.stop();
 });
 
-test('Meeting debounce resets when app reappears', () => {
+test('Meeting debounce resets when app reappears', async () => {
   const { MeetingDetector } = require('./src/meetings');
   const detector = new MeetingDetector();
   const events = [];
@@ -316,7 +339,8 @@ test('Meeting debounce resets when app reappears', () => {
   let mockOutput = 'zoom.us\n';
   detector._getRunningProcesses = () => Promise.resolve(mockOutput);
 
-  (async () => {
+  detector._isPolling = true;
+  await (async () => {
     // Start meeting
     await detector._poll();
     assert(events.length === 1 && events[0] === 'started');
@@ -465,6 +489,7 @@ test('prompts reference structured transcript format', () => {
 });
 
 // ─── Summary ────────────────────────────────────────────────────────────────
+Promise.all(pendingTests).then(() => {
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`  ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) {
@@ -474,3 +499,5 @@ if (failed > 0) {
   console.log('  ✦ All tests passed!\n');
   process.exit(0);
 }
+
+});
