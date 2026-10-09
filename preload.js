@@ -84,6 +84,9 @@ contextBridge.exposeInMainWorld('halo', {
     /** Set a config value by key. */
     set: (key, value) => ipcRenderer.invoke('halo:config-set', key, value),
 
+    /** Save a settings form as one snapshot. */
+    save: (values) => ipcRenderer.invoke('halo:config-save', values),
+
     /** Get all config values. */
     getAll: () => ipcRenderer.invoke('halo:config-get-all'),
   },

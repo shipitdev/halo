@@ -213,30 +213,26 @@
   }
 
   async function saveSettings() {
-    state.provider = dom.selectProvider.value;
-    state.apiKey = dom.inputApiKey.value;
-    state.sttProvider = dom.selectSttProvider.value;
-    state.sttApiKey = dom.inputSttKey.value;
-    state.audioInputDeviceId = dom.audioInput.value;
-
-    const newHotkeys = {
-      toggleOverlay: dom.hotkeyToggle ? dom.hotkeyToggle.value : 'CommandOrControl+B',
-      assist: dom.hotkeyAssist ? dom.hotkeyAssist.value : 'CommandOrControl+Return',
-      solveCode: dom.hotkeyCode ? dom.hotkeyCode.value : 'CommandOrControl+Shift+H',
-      quit: dom.hotkeyQuit ? dom.hotkeyQuit.value : 'CommandOrControl+Shift+X',
+    const values = {
+      provider: dom.selectProvider.value,
+      apiKey: dom.inputApiKey.value,
+      sttProvider: dom.selectSttProvider.value,
+      sttApiKey: dom.inputSttKey.value,
+      audioInputDeviceId: dom.audioInput.value,
+      useSmart: state.useSmart,
+      hotkeys: {
+        toggleOverlay: dom.hotkeyToggle.value,
+        assist: dom.hotkeyAssist.value,
+        solveCode: dom.hotkeyCode.value,
+        quit: dom.hotkeyQuit.value,
+      },
     };
-    state.hotkeys = newHotkeys;
-
     try {
-      await window.halo.settings.set('provider', state.provider);
-      await window.halo.settings.set('apiKey', state.apiKey);
-      await window.halo.settings.set('sttProvider', state.sttProvider);
-      await window.halo.settings.set('sttApiKey', state.sttApiKey);
-      await window.halo.settings.set('audioInputDeviceId', state.audioInputDeviceId);
-      await window.halo.settings.set('useSmart', state.useSmart);
-      await window.halo.settings.set('hotkeys', state.hotkeys);
+      await window.halo.settings.save(values);
+      Object.assign(state, values);
     } catch (err) {
-      console.error('Failed to save settings:', err);
+      showToast(`Settings were not saved: ${err.message}`);
+      return;
     }
 
     closeSettings();
