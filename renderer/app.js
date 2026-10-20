@@ -906,6 +906,7 @@
   }
 
   async function runAI(action, userText, context) {
+    if (state.isProcessing) return;
     if (!state.apiKey) {
       autoExpand();
       appendResponse('system', '⚠️ **API Key Required**\nPlease set your OpenAI or Gemini API key in **Settings** (⚙ top right) to start receiving AI answers.');
@@ -915,46 +916,47 @@
     }
 
     state.isProcessing = true;
-    setStatus('thinking', 'Thinking');
-    lastResizedH = 0;
-    autoExpand();
-
-    // Build messages — fetch prompt from the single source of truth via preload bridge
-    let systemPrompt;
+    let bodyEl;
     try {
-      systemPrompt = await window.halo.getPrompt(action);
-    } catch {
-      // Fallback to question prompt if IPC fails
-      systemPrompt = await window.halo.getPrompt('question');
-    }
-    const messages = [{ role: 'system', content: systemPrompt }];
+      setStatus('thinking', 'Thinking');
+      lastResizedH = 0;
+      autoExpand();
 
-    // Add conversation history (last 10 messages for context)
-    const recentHistory = state.conversationHistory.slice(-10);
-    messages.push(...recentHistory);
+      // Build messages — fetch prompt from the single source of truth via preload bridge
+      let systemPrompt;
+      try {
+        systemPrompt = await window.halo.getPrompt(action);
+      } catch {
+        // Fallback to question prompt if IPC fails
+        systemPrompt = await window.halo.getPrompt('question');
+      }
+      const messages = [{ role: 'system', content: systemPrompt }];
 
-    // Build user message
-    const userContent = buildUserContent(action, userText, context);
-    messages.push({ role: 'user', content: userContent });
+      // Add conversation history (last 10 messages for context)
+      const recentHistory = state.conversationHistory.slice(-10);
+      messages.push(...recentHistory);
 
-    // Show what we're doing
-    const actionLabels = {
-      assist: '✦ Assist',
-      say: '💬 What Should I Say',
-      followup: '→ Follow-up',
-      recap: '📋 Recap',
-      solveCode: '< > Solve Code',
-      analyzeScreen: 'Screen Analysis',
-      question: '? Question',
-      meetingAssist: '🎯 Meeting Assist',
-    };
-    const label = actionLabels[action] || action;
+      // Build user message
+      const userContent = buildUserContent(action, userText, context);
+      messages.push({ role: 'user', content: userContent });
 
-    const responseEl = createResponseEntry(label);
-    const bodyEl = responseEl.querySelector('.response-body');
-    bodyEl.classList.add('streaming-cursor');
+      // Show what we're doing
+      const actionLabels = {
+        assist: '✦ Assist',
+        say: '💬 What Should I Say',
+        followup: '→ Follow-up',
+        recap: '📋 Recap',
+        solveCode: '< > Solve Code',
+        analyzeScreen: 'Screen Analysis',
+        question: '? Question',
+        meetingAssist: '🎯 Meeting Assist',
+      };
+      const label = actionLabels[action] || action;
 
-    try {
+      const responseEl = createResponseEntry(label);
+      bodyEl = responseEl.querySelector('.response-body');
+      bodyEl.classList.add('streaming-cursor');
+
       const fullResponse = await streamAIResponse(messages, bodyEl, context?.screenshot);
 
       // Store in history
@@ -968,6 +970,10 @@
         state.conversationHistory = state.conversationHistory.slice(-MAX_CONVERSATION_HISTORY);
       }
     } catch (err) {
+      if (!bodyEl) {
+        appendResponse('system', `Assistant failed: ${err.message}`);
+        return;
+      }
       const is429 = (err.message || '').includes('429') || (err.message || '').includes('Rate Limit') || (err.message || '').includes('RESOURCE_EXHAUSTED');
       if (is429) {
         renderMarkdown(bodyEl, '⏳ **API Quota Exceeded (429)**\n\nYour Gemini API key has reached Google\'s Free Tier daily/minute request limit (`RESOURCE_EXHAUSTED`).\n\n**Quick Solutions:**\n1. Wait **15–30 seconds** for the per-minute quota window to reset.\n2. Create a standard Gemini API key (starts with `AIzaSy...`) at **[aistudio.google.com](https://aistudio.google.com/app/apikey)**.\n3. Or paste an **OpenAI API Key** (`sk-...`) in **Settings (⚙)** for GPT-4o & Whisper STT access.');
@@ -977,7 +983,7 @@
         renderMarkdown(bodyEl, `⚠️ **Error**: ${escapeHtml(err.message)}`);
       }
     } finally {
-      bodyEl.classList.remove('streaming-cursor');
+      bodyEl?.classList.remove('streaming-cursor');
       state.isProcessing = false;
       setStatus(state.isListening ? 'listening' : 'idle', state.isListening ? 'Listening' : 'Idle');
     }
@@ -1011,18 +1017,30 @@
   async function streamAIResponse(messages, targetEl, screenshot) {
     return new Promise((resolve, reject) => {
       let fullText = '';
+      let frame = null;
+      const render = () => {
+        frame = null;
+        renderMarkdown(targetEl, fullText);
+        scrollToBottom();
+        autoExpand();
+      };
+      const flush = () => {
+        if (frame !== null) cancelAnimationFrame(frame);
+        render();
+      };
       window.halo.streamAI(
         { messages, screenshot },
         (chunk) => {
           fullText += chunk;
-          renderMarkdown(targetEl, fullText);
-          scrollToBottom();
-          autoExpand();
+          if (frame === null) frame = requestAnimationFrame(render);
         },
         (finalText) => {
-          resolve(finalText);
+          fullText = finalText || fullText;
+          flush();
+          resolve(fullText);
         },
         (err) => {
+          flush();
           reject(err);
         }
       );
@@ -1068,14 +1086,20 @@
       return id;
     });
 
+    const mathBlocks = [];
+
     // Parse block math ($$ ... $$)
     source = source.replace(/\$\$\n?([\s\S]*?)\n?\$\$/g, (match, math) => {
-      return `\n\n<div class="math-block">${escapeHtml(formatLaTeX(math))}</div>\n\n`;
+      const id = `___MATH_BLOCK_${mathBlocks.length}___`;
+      mathBlocks.push(`<div class="math-block">${escapeHtml(formatLaTeX(math))}</div>`);
+      return `\n\n${id}\n\n`;
     });
 
     // Parse inline math ($ ... $)
     source = source.replace(/\$([^\$\n]+)\$/g, (match, math) => {
-      return `<span class="math-inline">${escapeHtml(formatLaTeX(math))}</span>`;
+      const id = `___MATH_BLOCK_${mathBlocks.length}___`;
+      mathBlocks.push(`<span class="math-inline">${escapeHtml(formatLaTeX(math))}</span>`);
+      return id;
     });
 
     let html = escapeHtml(source);
@@ -1116,6 +1140,10 @@
     html = html.replace(/\n\n/g, '</p><p>');
     html = '<p>' + html + '</p>';
 
+    mathBlocks.forEach((block, index) => {
+      html = html.replace(`___MATH_BLOCK_${index}___`, () => block);
+    });
+
     // Clean up empty paragraphs & wrapper divs
     html = html.replace(/<p><\/p>/g, '');
     html = html.replace(/<p>(<h[234]>)/g, '$1');
@@ -1135,7 +1163,7 @@
       const encodedCode = encodeURIComponent(code);
       const escapedCode = escapeHtml(code);
       const codeHtml = `<div class="code-block-wrapper" data-code="${encodedCode}"><div class="code-block-header"><span class="code-lang">${escapeHtml(lang)}</span><button class="copy-code-btn" type="button">Copy</button></div><pre><code class="lang-${escapeHtml(lang)}">${escapedCode}</code></pre></div>`;
-      html = html.replace(`___CODE_BLOCK_${i}___`, codeHtml);
+      html = html.replace(`___CODE_BLOCK_${i}___`, () => codeHtml);
     }
 
     el.innerHTML = html;
