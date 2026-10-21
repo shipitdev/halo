@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
 let userDataPath;
 try {
   const { app } = require('electron');
@@ -44,27 +45,38 @@ class ConfigManager {
       if (fs.existsSync(this.configPath)) {
         const raw = fs.readFileSync(this.configPath, 'utf-8');
         const parsed = JSON.parse(raw);
-        this.data = { ...DEFAULT_CONFIG, ...parsed };
+        this.data = { ...structuredClone(DEFAULT_CONFIG), ...parsed, hotkeys: { ...DEFAULT_CONFIG.hotkeys, ...parsed.hotkeys } };
       } else {
-        this.data = { ...DEFAULT_CONFIG };
+        this.data = structuredClone(DEFAULT_CONFIG);
       }
     } catch (err) {
       console.warn('Failed to load config, using defaults:', err.message);
-      this.data = { ...DEFAULT_CONFIG };
+      this.data = structuredClone(DEFAULT_CONFIG);
     }
   }
 
   /** Save current config to disk. */
-  _save() {
+  _save(data) {
+    fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
+    const temporaryPath = `${this.configPath}.${randomUUID()}.tmp`;
     try {
-      const dir = path.dirname(this.configPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(this.configPath, JSON.stringify(this.data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('Failed to save config:', err.message);
+      fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+      fs.renameSync(temporaryPath, this.configPath);
+      this.data = data;
+    } finally {
+      try { fs.unlinkSync(temporaryPath); } catch {} // Rename already removes the temporary file.
     }
+  }
+
+  /** Persist settings together so callers never observe a partially saved form. */
+  update(values) {
+    if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Invalid settings values.');
+    for (const key of Object.keys(values)) {
+      if (!key || key.includes('.') || ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Invalid settings key.');
+    }
+    const data = { ...structuredClone(this.data), ...structuredClone(values) };
+    data.hotkeys = { ...this.data.hotkeys, ...values.hotkeys };
+    this._save(data);
   }
 
   /**
@@ -93,8 +105,10 @@ class ConfigManager {
    * @param {*} value
    */
   set(key, value) {
-    const keys = key.split('.');
-    let target = this.data;
+    const keys = typeof key === 'string' ? key.split('.') : [];
+    if (!keys.length || keys.some(k => !k || ['__proto__', 'constructor', 'prototype'].includes(k))) throw new Error('Invalid settings key.');
+    const data = structuredClone(this.data);
+    let target = data;
 
     for (let i = 0; i < keys.length - 1; i++) {
       const k = keys[i];
@@ -104,8 +118,8 @@ class ConfigManager {
       target = target[k];
     }
 
-    target[keys[keys.length - 1]] = value;
-    this._save();
+    target[keys[keys.length - 1]] = structuredClone(value);
+    this._save(data);
   }
 
   /**
@@ -113,15 +127,14 @@ class ConfigManager {
    * @returns {Object}
    */
   getAll() {
-    return { ...this.data };
+    return structuredClone(this.data);
   }
 
   /**
    * Reset to defaults and persist.
    */
   reset() {
-    this.data = { ...DEFAULT_CONFIG };
-    this._save();
+    this._save(structuredClone(DEFAULT_CONFIG));
   }
 }
 
