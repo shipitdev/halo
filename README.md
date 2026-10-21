@@ -3,7 +3,7 @@
 ![Platform: macOS](https://img.shields.io/badge/Platform-macOS-blue)
 ![License: GPL--3.0](https://img.shields.io/badge/License-GPL--3.0-purple)
 
-A translucent, liquid-glass AI copilot overlay for macOS — captures your screen, mic, and desktop content in real time to power a live AI assistant.
+Halo is a discreet macOS overlay designed to help with coding problems and interview questions using screen content, spoken questions, and optional resume context.
 
 > [!NOTE]
 > **Halo is currently in Beta (v1.0.0)**. Features and APIs are actively evolving.
@@ -93,3 +93,17 @@ Images use lossless PNG at up to 2560 pixels wide, taking Retina scale into acco
 Screen analysis follows your typed note or explains the visible task; the coding
 hotkey keeps its dedicated coding prompt. A failed capture preserves your note and
 shows the error instead of asking the model to answer without the image.
+
+
+### Hidden-overlay behavior
+
+The goal is to keep Halo available to you while excluding it from screen shares.
+Halo now requests operating-system content protection and hides during its own
+screenshots. This is best-effort protection: newer macOS sharing apps using
+ScreenCaptureKit can still include a protected window. Verify your sharing setup;
+universal exclusion is not implemented. Track that work in
+[the hidden-overlay implementation report](https://github.com/shipitdev/halo/issues/3).
+
+Typed questions include the recent transcript, and explicit “What should I say”
+actions keep their own response format. Ending a meeting changes the selected
+assistance mode without deleting its transcript.
