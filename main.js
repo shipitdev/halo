@@ -68,6 +68,7 @@ function createOverlayWindow() {
       sandbox: false,
     },
   });
+  isVisible = true;
 
   // Best effort: newer macOS ScreenCaptureKit clients may still capture this window.
   mainWindow.setContentProtection(true);
@@ -93,7 +94,10 @@ function createOverlayWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    isVisible = false;
+    if (tray) updateTrayMenu();
   });
+  if (tray) updateTrayMenu();
 }
 
 // ─── Tray Icon ──────────────────────────────────────────────────────────────
@@ -137,7 +141,7 @@ function updateTrayMenu() {
       label: '⚙ Settings',
       click: () => {
         if (mainWindow) {
-          mainWindow.show();
+          showOverlay();
           mainWindow.webContents.send('halo:open-settings');
         }
       },
@@ -158,11 +162,19 @@ function toggleVisibility() {
 
   if (isVisible) {
     mainWindow.hide();
+    isVisible = false;
   } else {
-    mainWindow.show();
+    showOverlay();
+    return;
   }
-  isVisible = !isVisible;
   updateTrayMenu();
+}
+
+function showOverlay() {
+  if (!mainWindow) return;
+  mainWindow.show();
+  isVisible = true;
+  if (tray) updateTrayMenu();
 }
 
 function toggleListening() {
@@ -189,13 +201,13 @@ function registerHotkeys() {
     [hotkeys.toggleOverlay]: () => toggleVisibility(),
     [hotkeys.assist]: () => {
       if (mainWindow) {
-        mainWindow.show();
+        showOverlay();
         mainWindow.webContents.send('halo:action', 'assist');
       }
     },
     [hotkeys.solveCode]: () => {
       if (mainWindow) {
-        mainWindow.show();
+        showOverlay();
         mainWindow.webContents.send('halo:action', 'solveCode');
       }
     },
@@ -502,6 +514,8 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createOverlayWindow();
+    } else {
+      showOverlay();
     }
   });
 });
@@ -525,8 +539,10 @@ if (!gotTheLock) {
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {
-      mainWindow.show();
+      showOverlay();
       mainWindow.focus();
+    } else {
+      createOverlayWindow();
     }
   });
 }
