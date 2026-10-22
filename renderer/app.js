@@ -850,6 +850,11 @@
     const text = dom.inputField.value.trim();
     if (!text || state.isProcessing || state.isCapturing) return;
 
+    if (!state.apiKey) {
+      await runAI('question', text, { transcript: transcriptManager.buildContext() || null });
+      return;
+    }
+
     expandPanel();
     dom.inputField.value = '';
     await runAI('question', text, { transcript: transcriptManager.buildContext() || null });
@@ -972,9 +977,8 @@
       }
       const is429 = (err.message || '').includes('429') || (err.message || '').includes('Rate Limit') || (err.message || '').includes('RESOURCE_EXHAUSTED');
       if (is429) {
-        renderMarkdown(bodyEl, '⏳ **API Quota Exceeded (429)**\n\nYour Gemini API key has reached Google\'s Free Tier daily/minute request limit (`RESOURCE_EXHAUSTED`).\n\n**Quick Solutions:**\n1. Wait **15–30 seconds** for the per-minute quota window to reset.\n2. Create a standard Gemini API key (starts with `AIzaSy...`) at **[aistudio.google.com](https://aistudio.google.com/app/apikey)**.\n3. Or paste an **OpenAI API Key** (`sk-...`) in **Settings (⚙)** for GPT-4o & Whisper STT access.');
-        showToast('Quota Exceeded (429) — Click ⚙ Settings');
-        openSettings();
+        renderMarkdown(bodyEl, `⏳ **Request limit reached (429)**\n\n${escapeHtml(err.message)}\n\nWait a few seconds, then try again. Check the selected provider's API quota in Settings.`);
+        showToast('Request limit reached — try again shortly');
       } else {
         renderMarkdown(bodyEl, `⚠️ **Error**: ${escapeHtml(err.message)}`);
       }
