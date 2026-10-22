@@ -163,6 +163,7 @@
   // ─── Initialization ─────────────────────────────────────────────────────
   let isExpanded = false;
   let isClickthrough = false;
+  let isSavingModel = false;
   let sessionSeconds = 0;
   let sessionTimerInterval = null;
   const TOOLBAR_H = 48;
@@ -200,6 +201,7 @@
         state.sttApiKey = config.sttApiKey || '';
         state.audioInputDeviceId = config.audioInputDeviceId || '';
         state.useSmart = config.useSmart !== false;
+        syncModelToggle();
         state.hotkeys = config.hotkeys || {
           toggleOverlay: 'CommandOrControl+B',
           assist: 'CommandOrControl+Return',
@@ -623,11 +625,26 @@
   }
 
   // ─── Model Toggle ──────────────────────────────────────────────────────
-  function toggleModel() {
-    state.useSmart = !state.useSmart;
+  function syncModelToggle() {
     dom.modelLabel.textContent = state.useSmart ? 'smart' : 'fast';
     dom.btnModelToggle.classList.toggle('fast', !state.useSmart);
-    window.halo.settings.set('useSmart', state.useSmart);
+  }
+
+  async function toggleModel() {
+    if (isSavingModel) return;
+    isSavingModel = true;
+    dom.btnModelToggle.disabled = true;
+    const useSmart = !state.useSmart;
+    try {
+      await window.halo.settings.set('useSmart', useSmart);
+      state.useSmart = useSmart;
+      syncModelToggle();
+    } catch (err) {
+      showToast(`Model preference was not saved: ${err.message}`);
+    } finally {
+      isSavingModel = false;
+      dom.btnModelToggle.disabled = false;
+    }
   }
 
   // ─── Expand / Collapse ───────────────────────────────────────────────
