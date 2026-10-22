@@ -302,6 +302,7 @@
       }
     } catch (err) {
       console.error('Failed to upload resume:', err);
+      showToast(`Failed to upload resume: ${err.message}`);
     }
   }
 
@@ -313,6 +314,7 @@
       showToast('Resume removed');
     } catch (err) {
       console.error('Failed to clear resume:', err);
+      showToast(`Failed to remove resume: ${err.message}`);
     }
   }
 
@@ -334,8 +336,13 @@
           <button class="btn-remove-doc" data-id="${d.id}" title="Remove" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px;">✕</button>
         `;
         tag.querySelector('.btn-remove-doc').addEventListener('click', async () => {
-          await window.halo.knowledge.removeDocument(d.id);
-          await renderDocsUI();
+          try {
+            await window.halo.knowledge.removeDocument(d.id);
+            await renderDocsUI();
+          } catch (err) {
+            console.error('Failed to remove document:', err);
+            showToast(`Failed to remove document: ${err.message}`);
+          }
         });
         dom.docsList.appendChild(tag);
       });
@@ -354,6 +361,8 @@
       }
     } catch (err) {
       console.error('Failed to upload docs:', err);
+      await renderDocsUI();
+      showToast(err.message || 'Failed to add documents.');
     }
   }
 

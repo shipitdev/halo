@@ -310,13 +310,18 @@ function setupIPC() {
     if (result.canceled || result.filePaths.length === 0) return [];
 
     const added = [];
+    const failures = [];
     for (const fp of result.filePaths) {
       try {
         const doc = await kb.addDocument(fp);
         added.push(doc);
       } catch (err) {
         console.error('Failed to add document:', fp, err.message);
+        failures.push(`${path.basename(fp)}: ${err.message}`);
       }
+    }
+    if (failures.length) {
+      throw new Error(`${added.length ? `Added ${added.length} document(s); ` : ''}failed to add ${failures.join('; ')}`);
     }
     return added;
   });

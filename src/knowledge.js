@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
 let userDataPath;
 try {
   const { app } = require('electron');
@@ -47,22 +48,23 @@ class KnowledgeBase {
     const text = await this._extractText(filePath);
     const trimmed = text.slice(0, MAX_RESUME_TEXT);
 
-    this._resume = {
+    const resume = {
       filename: path.basename(filePath),
       text: trimmed,
       uploadedAt: new Date().toISOString(),
     };
 
-    this._saveJSON(RESUME_FILE, this._resume);
-    return this._resume;
+    this._saveJSON(RESUME_FILE, resume);
+    this._resume = resume;
+    return resume;
   }
 
   /** Remove stored resume. */
   clearResume() {
-    this._resume = null;
     if (fs.existsSync(RESUME_FILE)) {
       fs.unlinkSync(RESUME_FILE);
     }
+    this._resume = null;
   }
 
   // ─── Documents ────────────────────────────────────────────────────────
@@ -94,8 +96,9 @@ class KnowledgeBase {
       uploadedAt: new Date().toISOString(),
     };
 
-    this._documents.push(doc);
-    this._saveJSON(DOCS_FILE, this._documents);
+    const documents = [...this._documents, doc];
+    this._saveJSON(DOCS_FILE, documents);
+    this._documents = documents;
 
     return { id, filename: doc.filename, textLength: trimmed.length };
   }
@@ -109,8 +112,9 @@ class KnowledgeBase {
     const idx = this._documents.findIndex((d) => d.id === id);
     if (idx === -1) return false;
 
-    this._documents.splice(idx, 1);
-    this._saveJSON(DOCS_FILE, this._documents);
+    const documents = this._documents.filter((_, index) => index !== idx);
+    this._saveJSON(DOCS_FILE, documents);
+    this._documents = documents;
     return true;
   }
 
@@ -169,10 +173,14 @@ class KnowledgeBase {
   }
 
   _saveJSON(filePath, data) {
+    const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
     try {
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error(`KnowledgeBase: Failed to save ${filePath}:`, err.message);
+      fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 2), {
+        encoding: 'utf-8', mode: 0o600, flag: 'wx',
+      });
+      fs.renameSync(temporaryPath, filePath);
+    } finally {
+      try { fs.unlinkSync(temporaryPath); } catch {}
     }
   }
 
@@ -201,6 +209,7 @@ class KnowledgeBase {
   }
 
   async _extractPDF(filePath) {
+    let parser;
     try {
       const pdfModule = require('pdf-parse');
       const buffer = fs.readFileSync(filePath);
@@ -209,8 +218,7 @@ class KnowledgeBase {
         const data = await pdfModule(buffer);
         return data.text || '';
       } else if (pdfModule.PDFParse) {
-        const parser = new pdfModule.PDFParse({ data: buffer });
-        await parser.load();
+        parser = new pdfModule.PDFParse({ data: buffer });
         const parsed = await parser.getText();
         if (typeof parsed === 'string') return parsed;
         if (parsed && typeof parsed.text === 'string') return parsed.text;
@@ -219,13 +227,13 @@ class KnowledgeBase {
         const data = await pdfModule.default(buffer);
         return data.text || '';
       }
-      return '';
+      throw new Error('Unsupported pdf-parse API.');
     } catch (err) {
       console.error('PDF extraction failed:', err.message);
-      try {
-        return fs.readFileSync(filePath, 'utf-8');
-      } catch {
-        return '';
+      throw new Error(`Failed to extract PDF text: ${err.message}`);
+    } finally {
+      if (parser && typeof parser.destroy === 'function') {
+        try { await parser.destroy(); } catch {}
       }
     }
   }
