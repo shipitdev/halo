@@ -106,6 +106,8 @@ contextBridge.exposeInMainWorld('halo', {
 
   /** Sync listening state to main process. */
   setListeningState: (state) => ipcRenderer.send('halo:listening-state', state),
+  /** Read current main-process listening state after renderer startup. */
+  getListeningState: () => ipcRenderer.invoke('halo:get-listening-state'),
 
   // ─── Knowledge Base ───────────────────────────────────────────────
   knowledge: {

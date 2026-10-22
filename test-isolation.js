@@ -6,7 +6,10 @@ const Module = require('node:module');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'halo-tests-'));
 const load = Module._load;
 Module._load = function (name, ...args) {
-  if (name === 'electron') return { app: { getPath: () => directory } };
+  if (name === 'electron') return {
+    app: { getPath: () => directory },
+    desktopCapturer: { getSources: async () => [] },
+  };
   return load.call(this, name, ...args);
 };
 process.on('exit', () => fs.rmSync(directory, { recursive: true, force: true }));

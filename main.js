@@ -343,6 +343,8 @@ function setupIPC() {
     return meetingDetector ? meetingDetector.getActiveMeeting() : null;
   });
 
+  ipcMain.handle('halo:get-listening-state', () => isListening);
+
   // ─── System Prompts IPC ─────────────────────────────────────────────
 
   ipcMain.handle('halo:get-prompt', (_event, action) => {
@@ -484,9 +486,6 @@ app.whenReady().then(() => {
   setupIPC();
   registerHotkeys();
 
-  // Start meeting detection
-  meetingDetector.start();
-
   meetingDetector.on('meeting-started', (meeting) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('halo:meeting-detected', meeting);
@@ -498,6 +497,9 @@ app.whenReady().then(() => {
       mainWindow.webContents.send('halo:meeting-ended', meeting);
     }
   });
+
+  // Start polling only after the main process is listening for its events.
+  meetingDetector.start();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
