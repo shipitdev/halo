@@ -55,6 +55,6 @@ test('the overlay requests operating-system content protection', () => {
   }
   const context = { BrowserWindow: Window, screen: { getPrimaryDisplay: () => ({ workAreaSize: { width: 1920 } }) },
     path: require('node:path'), __dirname: process.cwd(), TOOLBAR_WIDTH: 700, TOOLBAR_HEIGHT: 48, MAX_EXPANDED_HEIGHT: 750 };
-  vm.runInNewContext(code + '\ncreateOverlayWindow();', context);
+  vm.runInNewContext('let tray = null; let isVisible = true; function updateTrayMenu() {}\n' + code + '\ncreateOverlayWindow();', context);
   assert.equal(protectedContent, true);
 });
