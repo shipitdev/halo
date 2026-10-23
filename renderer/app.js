@@ -599,6 +599,7 @@
   }
 
   // ─── IPC Listeners ──────────────────────────────────────────────────────
+  let listeningStateRevision = 0;
   function bindIPCListeners() {
     // Hotkey/tray triggers
     window.halo.onAction((action) => {
@@ -607,10 +608,17 @@
 
     // Tray listening toggle
     window.halo.onToggleListening((shouldListen) => {
+      listeningStateRevision++;
       if (shouldListen !== state.isListening) {
         toggleListening();
       }
     });
+    if (window.halo.getListeningState) {
+      const revision = listeningStateRevision;
+      window.halo.getListeningState().then((shouldListen) => {
+        if (revision === listeningStateRevision && shouldListen !== state.isListening) toggleListening();
+      }).catch(() => {});
+    }
 
     // Tray settings
     window.halo.onOpenSettings(() => {
@@ -618,8 +626,10 @@
     });
 
     // Meeting detection
+    let meetingEventRevision = 0;
     if (window.halo.onMeetingDetected) {
       window.halo.onMeetingDetected((meeting) => {
+        meetingEventRevision++;
         transcriptManager.setMeeting(meeting);
         showToast(`Meeting detected: ${meeting.name} — Halo active`);
       });
@@ -627,9 +637,18 @@
 
     if (window.halo.onMeetingEnded) {
       window.halo.onMeetingEnded((meeting) => {
+        meetingEventRevision++;
         transcriptManager.clearMeeting();
         showToast(`Meeting ended: ${meeting.name}`);
       });
+    }
+    if (window.halo.getActiveMeeting) {
+      const revision = meetingEventRevision;
+      window.halo.getActiveMeeting().then((meeting) => {
+        if (revision !== meetingEventRevision) return;
+        if (meeting) transcriptManager.setMeeting(meeting);
+        else transcriptManager.clearMeeting();
+      }).catch(() => {});
     }
   }
 
@@ -757,6 +776,7 @@
 
   async function startListening() {
     if (state.isListening) return;
+    listeningStateRevision++;
     const session = (state.listenSession || 0) + 1;
     state.listenSession = session;
     try {
@@ -825,6 +845,7 @@
   }
 
   function stopListening() {
+    listeningStateRevision++;
     state.isListening = false;
 
     if (state.audioChunkInterval) {

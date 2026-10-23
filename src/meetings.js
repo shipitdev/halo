@@ -6,6 +6,7 @@
 
 const { exec } = require('child_process');
 const EventEmitter = require('events');
+const { desktopCapturer } = require('electron');
 
 // Process names / window title patterns for each meeting platform
 const MEETING_APPS = [
@@ -26,6 +27,7 @@ class MeetingDetector extends EventEmitter {
     this._activeMeeting = null; // { id, name, startedAt }
     this._pollTimer = null;
     this._isPolling = false;
+    this._pollRevision = 0;
     this._emptyPollCount = 0; // Debounce counter for meeting-ended
   }
 
@@ -44,6 +46,7 @@ class MeetingDetector extends EventEmitter {
    */
   stop() {
     this._isPolling = false;
+    this._pollRevision++;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -70,10 +73,25 @@ class MeetingDetector extends EventEmitter {
 
   async _poll() {
     if (!this._isPolling) return;
+    const revision = ++this._pollRevision;
 
     try {
       const runningProcesses = await this._getRunningProcesses();
-      const detectedApp = this._matchMeetingApp(runningProcesses);
+      if (!this._isPolling || revision !== this._pollRevision) return;
+      let detectedApp = this._matchMeetingApp(runningProcesses);
+      if (!detectedApp) {
+        if (!desktopCapturer?.getSources) return;
+        try {
+          const windowSources = await desktopCapturer.getSources({
+            types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false,
+          });
+          detectedApp = MEETING_APPS.find(app => !app.processNames.length
+            && windowSources.some(source => app.windowTitle.test(source.name || ''))) || null;
+        } catch {
+          return; // An unavailable title scan is unknown, not an empty meeting poll.
+        }
+      }
+      if (!this._isPolling || revision !== this._pollRevision) return;
 
       if (detectedApp && !this._activeMeeting) {
         // Meeting just started
@@ -83,6 +101,17 @@ class MeetingDetector extends EventEmitter {
           name: detectedApp.name,
           startedAt: new Date().toISOString(),
         };
+        this.emit('meeting-started', this._activeMeeting);
+      } else if (detectedApp && this._activeMeeting && detectedApp.id !== this._activeMeeting.id) {
+        const ended = { ...this._activeMeeting };
+        this._activeMeeting = null;
+        this.emit('meeting-ended', ended);
+        this._activeMeeting = {
+          id: detectedApp.id,
+          name: detectedApp.name,
+          startedAt: new Date().toISOString(),
+        };
+        this._emptyPollCount = 0;
         this.emit('meeting-started', this._activeMeeting);
       } else if (detectedApp && this._activeMeeting) {
         // Meeting still active — reset debounce
